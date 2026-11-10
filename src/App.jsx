@@ -194,97 +194,21 @@ function validateEmail(email) {
 // 15 soal pilihan ganda tingkat SD yang mudah. Posisi jawaban benar sudah diacak merata.
 const SAMPLE_QUIZ_TITLE = '🎮 Simulasi Kuis: Pengetahuan Umum';
 const SAMPLE_QUESTIONS = [
-  {
-    type: 'pg',
-    prompt: 'Berapa hasil 2 + 3?',
-    options: ['4', '5', '6', '7'],
-    correct_index: 1,
-  },
-  {
-    type: 'pg',
-    prompt: 'Hewan yang suka mengeong adalah...',
-    options: ['Kucing', 'Anjing', 'Ayam', 'Sapi'],
-    correct_index: 0,
-  },
-  {
-    type: 'pg',
-    prompt: 'Berapa jumlah hari dalam seminggu?',
-    options: ['5', '6', '8', '7'],
-    correct_index: 3,
-  },
-  {
-    type: 'pg',
-    prompt: 'Matahari terbit dari arah...',
-    options: ['Barat', 'Utara', 'Timur', 'Selatan'],
-    correct_index: 2,
-  },
-  {
-    type: 'pg',
-    prompt: 'Warna buah pisang yang sudah matang adalah...',
-    options: ['Kuning', 'Biru', 'Hitam', 'Ungu'],
-    correct_index: 0,
-  },
-  {
-    type: 'pg',
-    prompt: 'Berapa hasil 10 - 4?',
-    options: ['5', '7', '6', '8'],
-    correct_index: 2,
-  },
-  {
-    type: 'pg',
-    prompt:
-      'Hewan yang hidup di dalam air dan bernapas dengan insang adalah...',
-    options: ['Kucing', 'Ikan', 'Burung', 'Kambing'],
-    correct_index: 1,
-  },
-  {
-    type: 'pg',
-    prompt: 'Ibu kota negara Indonesia adalah...',
-    options: ['Bandung', 'Surabaya', 'Medan', 'Jakarta'],
-    correct_index: 3,
-  },
-  {
-    type: 'pg',
-    prompt: 'Berapa jumlah kaki seekor ayam?',
-    options: ['2', '4', '6', '8'],
-    correct_index: 0,
-  },
-  {
-    type: 'pg',
-    prompt: 'Benda langit yang bersinar di malam hari adalah...',
-    options: ['Matahari', 'Awan', 'Bulan', 'Pelangi'],
-    correct_index: 2,
-  },
-  {
-    type: 'pg',
-    prompt: 'Berapa hasil 5 x 2?',
-    options: ['7', '10', '12', '15'],
-    correct_index: 1,
-  },
-  {
-    type: 'pg',
-    prompt: 'Alat yang dipakai untuk menulis di buku adalah...',
-    options: ['Sendok', 'Sapu', 'Pensil', 'Payung'],
-    correct_index: 2,
-  },
-  {
-    type: 'pg',
-    prompt: 'Air yang sangat dingin akan berubah menjadi...',
-    options: ['Es', 'Api', 'Asap', 'Pasir'],
-    correct_index: 0,
-  },
-  {
-    type: 'pg',
-    prompt: 'Berapa hasil 20 + 20?',
-    options: ['30', '50', '60', '40'],
-    correct_index: 3,
-  },
-  {
-    type: 'pg',
-    prompt: 'Hewan yang bisa terbang adalah...',
-    options: ['Burung', 'Kuda', 'Kerbau', 'Kelinci'],
-    correct_index: 0,
-  },
+  { type: 'pg', prompt: 'Berapa hasil 2 + 3?', options: ['4', '5', '6', '7'], correct_index: 1 },
+  { type: 'pg', prompt: 'Hewan yang suka mengeong adalah...', options: ['Kucing', 'Anjing', 'Ayam', 'Sapi'], correct_index: 0 },
+  { type: 'pg', prompt: 'Berapa jumlah hari dalam seminggu?', options: ['5', '6', '8', '7'], correct_index: 3 },
+  { type: 'pg', prompt: 'Matahari terbit dari arah...', options: ['Barat', 'Utara', 'Timur', 'Selatan'], correct_index: 2 },
+  { type: 'pg', prompt: 'Warna buah pisang yang sudah matang adalah...', options: ['Kuning', 'Biru', 'Hitam', 'Ungu'], correct_index: 0 },
+  { type: 'pg', prompt: 'Berapa hasil 10 - 4?', options: ['5', '7', '6', '8'], correct_index: 2 },
+  { type: 'pg', prompt: 'Hewan yang hidup di dalam air dan bernapas dengan insang adalah...', options: ['Kucing', 'Ikan', 'Burung', 'Kambing'], correct_index: 1 },
+  { type: 'pg', prompt: 'Ibu kota negara Indonesia adalah...', options: ['Bandung', 'Surabaya', 'Medan', 'Jakarta'], correct_index: 3 },
+  { type: 'pg', prompt: 'Berapa jumlah kaki seekor ayam?', options: ['2', '4', '6', '8'], correct_index: 0 },
+  { type: 'pg', prompt: 'Benda langit yang bersinar di malam hari adalah...', options: ['Matahari', 'Awan', 'Bulan', 'Pelangi'], correct_index: 2 },
+  { type: 'pg', prompt: 'Berapa hasil 5 x 2?', options: ['7', '10', '12', '15'], correct_index: 1 },
+  { type: 'pg', prompt: 'Alat yang dipakai untuk menulis di buku adalah...', options: ['Sendok', 'Sapu', 'Pensil', 'Payung'], correct_index: 2 },
+  { type: 'pg', prompt: 'Air yang sangat dingin akan berubah menjadi...', options: ['Es', 'Api', 'Asap', 'Pasir'], correct_index: 0 },
+  { type: 'pg', prompt: 'Berapa hasil 20 + 20?', options: ['30', '50', '60', '40'], correct_index: 3 },
+  { type: 'pg', prompt: 'Hewan yang bisa terbang adalah...', options: ['Burung', 'Kuda', 'Kerbau', 'Kelinci'], correct_index: 0 },
 ];
 
 async function seedSampleQuiz(ownerId) {
@@ -386,6 +310,24 @@ function Cat({ cat = 'orange', action = 'idle', size = 88 }) {
   );
 }
 
+// Stopwatch dipisah jadi komponen sendiri supaya hanya angka ini yang di-render ulang
+// (dulu seluruh aplikasi di-render ulang ~27x per detik, itu penyebab utama lag)
+function RaceTimer({ startTime, running }) {
+  const [ms, setMs] = useState(0);
+  useEffect(() => {
+    if (!startTime) {
+      setMs(0);
+      return;
+    }
+    const tick = () => setMs(Date.now() - startTime);
+    tick();
+    if (!running) return;
+    const id = setInterval(tick, 50);
+    return () => clearInterval(id);
+  }, [startTime, running]);
+  return <b>{formatTime(ms)}</b>;
+}
+
 export default function App() {
   const [uid, setUid] = useState(null);
   const [screen, setScreen] = useState('home');
@@ -394,8 +336,7 @@ export default function App() {
 
   // Deteksi layar HP (breakpoint sama dengan CSS) supaya tinggi arena balapan pas
   const [isMobile, setIsMobile] = useState(
-    () =>
-      typeof window !== 'undefined' && window.matchMedia(MOBILE_QUERY).matches
+    () => typeof window !== 'undefined' && window.matchMedia(MOBILE_QUERY).matches
   );
   useEffect(() => {
     const mq = window.matchMedia(MOBILE_QUERY);
@@ -455,7 +396,6 @@ export default function App() {
   );
 
   const [raceStartTime, setRaceStartTime] = useState(null);
-  const [elapsedMs, setElapsedMs] = useState(0);
   const [question, setQuestion] = useState(null);
   const [feedback, setFeedback] = useState('');
   const [quizSeconds, setQuizSeconds] = useState(15);
@@ -490,6 +430,7 @@ export default function App() {
   const busyRef = useRef(false);
   const answerRef = useRef(null);
   const quizTimeoutRef = useRef(false);
+  const prefetchRef = useRef({ key: '', q: null });
 
   const allPlayersRaw = [...players, ...localBots];
   const rankedPlayers = [...allPlayersRaw].sort((a, b) => {
@@ -655,9 +596,7 @@ export default function App() {
       setHideWelcome(false);
       return;
     }
-    setHideWelcome(
-      localStorage.getItem(`catdash_hide_welcome_${uid}`) === 'true'
-    );
+    setHideWelcome(localStorage.getItem(`catdash_hide_welcome_${uid}`) === 'true');
   }, [uid]);
 
   // Tampilkan pesan selamat datang SEKALI setiap aplikasi dibuka / user login
@@ -947,7 +886,7 @@ export default function App() {
       setShowResults(true);
       if (!finishedRef.current) {
         finishedRef.current = true;
-        setFinalMs(raceStartTime ? Date.now() - raceStartTime : elapsedMs);
+        setFinalMs(raceStartTime ? Date.now() - raceStartTime : 0);
         setShowCongrats(true); // selamat dulu, baru podium
         fx('finish');
       }
@@ -1050,12 +989,24 @@ export default function App() {
     if (!room?.id || !supabase) return;
     const id = room.id;
     let active = true;
+    let last = 0;
+    let pending = null;
+    // gabungkan banyak event realtime jadi 1 refresh (maksimal sekali per 700 ms)
+    const kick = () => {
+      if (!active || pending) return;
+      const wait = Math.max(0, 700 - (Date.now() - last));
+      pending = setTimeout(() => {
+        pending = null;
+        last = Date.now();
+        if (active) refreshRoom(id).catch(() => {});
+      }, wait);
+    };
     const channel = supabase
       .channel(`catdash-${id}`)
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'rooms', filter: `id=eq.${id}` },
-        () => active && refreshRoom(id).catch(() => {})
+        kick
       )
       .on(
         'postgres_changes',
@@ -1065,15 +1016,16 @@ export default function App() {
           table: 'room_players',
           filter: `room_id=eq.${id}`,
         },
-        () => active && refreshRoom(id).catch(() => {})
+        kick
       )
       .subscribe();
     const timer = setInterval(
-      () => active && refreshRoom(id).catch(() => {}),
+      kick,
       1800
     );
     return () => {
       active = false;
+      clearTimeout(pending);
       clearInterval(timer);
       supabase.removeChannel(channel);
     };
@@ -1088,6 +1040,11 @@ export default function App() {
     const key = `${room.id}-${me.correct_count}-${me.wrong_count}`;
     if (quizKey.current === key) return;
     quizKey.current = key;
+    // pakai soal yang sudah diambil lebih awal kalau ada
+    if (prefetchRef.current.key === key && prefetchRef.current.q) {
+      setQuestion(prefetchRef.current.q);
+      return;
+    }
     rpc('current_game_question', { p_room: room.id })
       .then((q) => {
         if (q && q.prompt && Array.isArray(q.options)) setQuestion(q);
@@ -1121,19 +1078,50 @@ export default function App() {
   useEffect(() => {
     if (room?.status !== 'racing' || !raceReady) {
       setRaceStartTime(null);
-      setElapsedMs(0);
       return;
     }
     setRaceStartTime((old) => old ?? Date.now());
   }, [room?.status, raceReady]);
 
+  // Ambil soal berikutnya lebih awal saat energi mulai menipis,
+  // jadi saat energi habis soal langsung muncul tanpa menunggu
   useEffect(() => {
-    if (!raceStartTime || room?.status !== 'racing' || showResults) return;
-    const tick = () => setElapsedMs(Date.now() - raceStartTime);
-    tick();
-    const id = setInterval(tick, 37);
-    return () => clearInterval(id);
-  }, [raceStartTime, room?.status, showResults]);
+    if (
+      !room?.id ||
+      room.status !== 'racing' ||
+      !me ||
+      me.needs_quiz ||
+      me.finished_at ||
+      showResults ||
+      Number(me.energy) > 60
+    )
+      return;
+    const key = `${room.id}-${me.correct_count}-${me.wrong_count}`;
+    if (prefetchRef.current.key === key) return;
+    prefetchRef.current = { key, q: null };
+    rpc('current_game_question', { p_room: room.id })
+      .then((q) => {
+        if (
+          prefetchRef.current.key === key &&
+          q &&
+          q.prompt &&
+          Array.isArray(q.options)
+        )
+          prefetchRef.current.q = q;
+      })
+      .catch(() => {
+        if (prefetchRef.current.key === key) prefetchRef.current.key = '';
+      });
+  }, [
+    room?.id,
+    room?.status,
+    me?.energy,
+    me?.needs_quiz,
+    me?.correct_count,
+    me?.wrong_count,
+    me?.finished_at,
+    showResults,
+  ]);
 
   useEffect(() => {
     if (
@@ -1471,7 +1459,8 @@ export default function App() {
             )
           );
         }
-        await refreshRoom(room.id);
+        // tidak ditunggu: jawaban langsung terasa selesai, data room menyusul di latar belakang
+        refreshRoom(room.id).catch(() => {});
       } catch (e) {
         setFeedback('Terjadi kesalahan sistem.');
         setError(msg(e));
@@ -1583,9 +1572,8 @@ export default function App() {
   const howToItems = (
     <ol className="instruction-list">
       <li>
-        Tekan <span className="kbd">D</span> (atau{' '}
-        <span className="kbd">→</span>, atau tombol <b>LARI</b>) berulang-ulang
-        untuk menggerakkan kucingmu.
+        Tekan <span className="kbd">D</span> (atau <span className="kbd">→</span>
+        , atau tombol <b>LARI</b>) berulang-ulang untuk menggerakkan kucingmu.
       </li>
       <li>
         Tahan <span className="kbd">SHIFT</span> (atau tombol <b>⚡ SPRINT</b>)
@@ -1600,11 +1588,18 @@ export default function App() {
         waktu habis = dapat soal baru.
       </li>
       <li>
-        Kucingmu ditandai <b>panah kuning ▼ KAMU</b> di atas kepalanya. Siapa
-        yang pertama sampai garis finish 🏁 (300 m) menang!
+        Kucingmu ditandai <b>panah kuning ▼ KAMU</b> di atas kepalanya.
+        Siapa yang pertama sampai garis finish 🏁 (300 m) menang!
       </li>
     </ol>
   );
+
+  // Saat soal kuis tampil, animasi latar dijeda supaya tidak berat
+  const quizOpen =
+    screen === 'room' &&
+    room?.status === 'racing' &&
+    !!me?.needs_quiz &&
+    !showResults;
 
   // Kalau target tutorial ada di dasar layar, tooltip dipindah ke atas target supaya tidak terpotong
   const tipAbove =
@@ -1614,7 +1609,11 @@ export default function App() {
       window.innerHeight;
 
   return (
-    <main className={`wrap ${isShaking ? 'shake' : ''}`}>
+    <main
+      className={`wrap ${isShaking ? 'shake' : ''} ${
+        quizOpen ? 'quizOpen' : ''
+      }`}
+    >
       <audio
         ref={menuBgmRef}
         src="/audio/bgm_menu.mp3"
@@ -1801,8 +1800,8 @@ export default function App() {
                   required
                 />
                 <small style={{ display: 'block', marginTop: '6px' }}>
-                  Gunakan email aktif (Gmail, Yahoo, Outlook, iCloud, atau email
-                  sekolah/kampus).
+                  Gunakan email aktif (Gmail, Yahoo, Outlook, iCloud, atau
+                  email sekolah/kampus).
                 </small>
               </label>
               <label>
@@ -2149,7 +2148,10 @@ export default function App() {
                 <div>
                   <p>
                     Belum punya kuis.{' '}
-                    <button className="linkBtn" onClick={openCreate}>
+                    <button
+                      className="linkBtn"
+                      onClick={openCreate}
+                    >
                       Buat kuis dulu
                     </button>
                     .
@@ -2173,10 +2175,7 @@ export default function App() {
                 value={botCount}
                 onChange={(e) =>
                   setBotCount(
-                    Math.max(
-                      0,
-                      Math.min(5, Math.floor(Number(e.target.value) || 0))
-                    )
+                    Math.max(0, Math.min(5, Math.floor(Number(e.target.value) || 0)))
                   )
                 }
               />
@@ -2448,7 +2447,10 @@ export default function App() {
                   </div>
                   <div className="hudPill timerPill">
                     <span className="hudIcon">◷</span>
-                    <b>{formatTime(elapsedMs)}</b>
+                    <RaceTimer
+                      startTime={raceStartTime}
+                      running={!showResults}
+                    />
                   </div>
                   <div className="energyPill">
                     <span>⚡</span>
@@ -2776,7 +2778,11 @@ export default function App() {
                   </h3>
                   <div className="answerGrid">
                     {question.options.map((o, i) => (
-                      <button key={i} disabled={busy} onClick={() => answer(i)}>
+                      <button
+                        key={i}
+                        disabled={busy}
+                        onClick={() => answer(i)}
+                      >
                         {'ABCD'[i]}. {o}
                       </button>
                     ))}
