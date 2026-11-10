@@ -1280,4 +1280,85 @@ footer { text-align: center; color: var(--text-muted); font-size: 12px; margin: 
     .rivalName { display: none; }
     .runnerTrackName { left: auto; right: 42px; top: 2px; }
   }
+
+  /* ===== TOAST / POP-UP NOTIFIKASI ===== */
+.toast-container {
+  position: fixed;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10002;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(420px, calc(100vw - 24px));
+  pointer-events: none;
+}
+.toast {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 18px;
+  border-radius: 16px;
+  font-weight: 700;
+  font-size: 14px;
+  line-height: 1.4;
+  box-shadow: 0 10px 30px rgba(68, 54, 42, 0.25), 0 4px 0 rgba(0, 0, 0, 0.08);
+  animation: toastIn 0.35s cubic-bezier(0.175, 0.885, 0.32, 1.275) both;
+}
+.toast button {
+  background: none;
+  box-shadow: none;
+  padding: 0 6px;
+  font-size: 20px;
+  color: inherit;
+  min-width: auto;
+}
+.toast-error {
+  background: #fff0ee;
+  border: 3px solid var(--pink-soft);
+  color: var(--pink-shadow);
+}
+.toast-info {
+  background: #eaf4f4;
+  border: 3px solid var(--blue-sky);
+  color: var(--text-sea);
+}
+.toast-success {
+  background: #f1f6e8;
+  border: 3px solid var(--green-moss);
+  color: var(--green-moss);
+}
+@keyframes toastIn {
+  0%   { opacity: 0; transform: translateY(-20px) scale(0.92); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* ===== RIWAYAT MAIN (PROFIL) ===== */
+.history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+.history-item {
+  background: var(--bg-cream);
+  border: 2px solid var(--panel-border);
+  border-radius: 12px;
+  padding: 12px 14px;
+  box-shadow: 0 3px 0 var(--panel-border);
+  animation: fadeIn 0.3s ease;
+}
+.history-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+  font-weight: 700;
+}
   

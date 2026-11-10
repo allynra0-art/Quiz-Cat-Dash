@@ -36,7 +36,7 @@ const TOUR_FLOWS = {
     {
       id: 'tour-btn-profil',
       title: 'Profil 👤',
-      desc: 'Klik ikon ini untuk mengubah nama atau keluar dari akun.',
+      desc: 'Klik ikon ini untuk mengubah nama, melihat Riwayat Bermain (hasil balapanmu 7 hari terakhir), atau keluar dari akun.',
     },
   ],
   create: [
@@ -85,7 +85,7 @@ const TOUR_FLOWS = {
     {
       id: 'tour-input-bot',
       title: 'Lawan Bot 🤖',
-      desc: 'Isi angka 0-5. Kalau kamu main sendirian, tambahkan Bot sebagai lawan.',
+      desc: 'Isi angka 0-5. Bot akan otomatis hilang jika ada pemain asli yang bergabung ke room.',
     },
     {
       id: 'tour-input-timer',
@@ -120,6 +120,11 @@ const TOUR_FLOWS = {
       id: 'tour-btn-simpan-profil',
       title: 'Simpan Nama',
       desc: 'Klik untuk menyimpan perubahan nama.',
+    },
+    {
+      id: 'tour-riwayat',
+      title: 'Riwayat Bermain 📜',
+      desc: 'Ini daftar riwayat balapanmu. Setiap selesai main, hasilnya tersimpan otomatis: judul kuis, posisi akhir (misal 2/5), waktu tempuh, dan jumlah jawaban benar. Yang terbaru ada di paling atas, dan riwayat lebih dari 1 minggu akan terhapus sendiri. Kalau masih kosong, mainkan satu balapan sampai finish dulu.',
     },
     {
       id: 'tour-btn-logout',
@@ -187,6 +192,14 @@ function validateEmail(email) {
     ALLOWED_EMAIL_SUFFIXES.some((suffix) => domain.endsWith(suffix));
   if (!ok)
     return 'Gunakan email dari Gmail, Yahoo, Outlook, iCloud, atau email sekolah/kampus (contoh: namamu@gmail.com).';
+  return '';
+}
+
+function validatePassword(pwd) {
+  if (pwd.length < 8) return 'Password minimal 8 karakter.';
+  if (!/[A-Z]/.test(pwd)) return 'Password harus mengandung minimal 1 huruf BESAR (A-Z).';
+  if (!/[a-z]/.test(pwd)) return 'Password harus mengandung minimal 1 huruf kecil (a-z).';
+  if (!/[0-9]/.test(pwd)) return 'Password harus mengandung minimal 1 angka (0-9).';
   return '';
 }
 
@@ -419,6 +432,26 @@ export default function App() {
   const [showWelcome, setShowWelcome] = useState(false);
   const [hideWelcome, setHideWelcome] = useState(false); // "jangan tampilkan lagi"
   const welcomeShownRef = useRef(false);
+  
+    // ===== TOAST / POP-UP NOTIFIKASI =====
+  const [toasts, setToasts] = useState([]);
+  const toastIdRef = useRef(0);
+  const notify = useCallback((message, type = 'info') => {
+    const id = ++toastIdRef.current;
+    setToasts((prev) => [...prev, { id, message, type }]);
+    setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 4500);
+  }, []);
+
+  // ===== PASSWORD TOGGLE =====
+  const [showPassword, setShowPassword] = useState(false);
+
+  // ===== RIWAYAT MAIN =====
+  const [history, setHistory] = useState([]);
+
+  // ===== DETEKSI PEMAIN ASLI BERGABUNG (untuk hapus bot) =====
+  const prevRealPlayersRef = useRef(null);
+  const localBotsRef = useRef([]);
+  useEffect(() => { localBotsRef.current = localBots; }, [localBots]);
 
   const moveRef = useRef({
     sprinting: false,
@@ -612,6 +645,8 @@ export default function App() {
     setHideWelcome(localStorage.getItem(`catdash_hide_welcome_${uid}`) === 'true');
   }, [uid]);
 
+  
+
   // Tampilkan pesan selamat datang SEKALI setiap aplikasi dibuka / user login
   useEffect(() => {
     if (!uid) {
@@ -632,10 +667,46 @@ export default function App() {
     else localStorage.removeItem(`catdash_hide_welcome_${uid}`);
   };
 
+    // Muat riwayat dari Supabase, sekaligus hapus otomatis yang > 7 hari
+  const refreshHistory = useCallback(async () => {
+    if (!uid || !supabase) { setHistory([]); return; }
+    try {
+      const sevenDaysAgo = new Date(
+        Date.now() - 7 * 24 * 60 * 60 * 1000
+      ).toISOString();
+
+      await supabase
+        .from('match_history')
+        .delete()
+        .eq('user_id', uid)
+        .lt('played_at', sevenDaysAgo);
+
+      const { data, error: e } = await supabase
+        .from('match_history')
+        .select('*')
+        .eq('user_id', uid)
+        .order('played_at', { ascending: false })
+        .limit(50);
+
+      if (e) throw e;
+      setHistory(data || []);
+    } catch {
+      setHistory([]);
+    }
+  }, [uid]);
+  useEffect(() => { refreshHistory(); }, [refreshHistory, screen]);
+
   const closeWelcome = (withTutorial) => {
     setShowWelcome(false);
     fx('click');
     if (withTutorial) startTutorial();
+  };
+
+  // Tutup modal panduan cara main (dipakai di lobby)
+  const closeHowTo = () => {
+    setShowHowTo(false);
+    localStorage.setItem('catdash_howto_seen', 'true');
+    fx('click');
   };
 
   // ===== BGM & GAMEPLAY =====
@@ -671,6 +742,42 @@ export default function App() {
     return () => document.removeEventListener('click', handleFirstClick);
   }, [soundOn, screen, room?.status]);
 
+    // Musik berhenti saat tab tidak aktif / keluar dari web
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        menuBgmRef.current?.pause();
+        raceBgmRef.current?.pause();
+      } else if (soundOn) {
+        const isRacing = screen === 'room' && room?.status === 'racing';
+        if (isRacing) {
+          if (raceBgmRef.current) {
+            raceBgmRef.current.volume = 0.2;
+            raceBgmRef.current.play().catch(() => {});
+          }
+        } else {
+          if (menuBgmRef.current) {
+            menuBgmRef.current.volume = 0.15;
+            menuBgmRef.current.play().catch(() => {});
+          }
+        }
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [soundOn, screen, room?.status]);
+
+    useEffect(() => {
+    if (!error) return;
+    const id = setTimeout(() => setError(''), 6000);
+    return () => clearTimeout(id);
+  }, [error]);
+  useEffect(() => {
+    if (!feedback) return;
+    const id = setTimeout(() => setFeedback(''), 5000);
+    return () => clearTimeout(id);
+  }, [feedback]);
+
   // ===== COUNTDOWN 3-2-1-GO SEBELUM BALAPAN =====
   useEffect(() => {
     if (room?.status !== 'racing') {
@@ -679,7 +786,6 @@ export default function App() {
       setCountdown(null);
       return;
     }
-    if (countdownStartedRef.current) return;
     countdownStartedRef.current = true;
     setRaceReady(false);
     setShowHowTo(false);
@@ -703,6 +809,25 @@ export default function App() {
     }, 1000);
     return () => clearInterval(id);
   }, [room?.status]);
+
+    // Bot otomatis hilang di semua device yang memilikinya ketika pemain asli bergabung
+  useEffect(() => {
+    if (screen !== 'room' || !room) {
+      prevRealPlayersRef.current = null;
+      return;
+    }
+    const realCount = players.length;
+    if (prevRealPlayersRef.current === null) {
+      prevRealPlayersRef.current = realCount;
+      return;
+    }
+    if (realCount > prevRealPlayersRef.current && localBotsRef.current.length > 0) {
+      setLocalBots([]);
+      notify('🤖 Bot dihapus otomatis karena ada pemain asli yang bergabung!', 'info');
+      fx('click');
+    }
+    prevRealPlayersRef.current = realCount;
+  }, [players.length, screen, room, notify]);
 
   const refreshQuizzes = useCallback(async () => {
     if (!supabase || !uid) return;
@@ -872,6 +997,46 @@ export default function App() {
     advancePlayer();
   };
 
+    useEffect(() => {
+    if (room?.status === 'racing' && me?.finished_at) {
+      setShowResults(true);
+      if (!finishedRef.current) {
+        finishedRef.current = true;
+        const elapsed = raceStartTime ? Date.now() - raceStartTime : 0;
+        setFinalMs(elapsed);
+        setShowCongrats(true);
+        fx('finish');
+
+        // Simpan riwayat ke Supabase
+        (async () => {
+          if (!uid || !room || !supabase) return;
+          try {
+            let quizTitle = quizzes.find((q) => q.id === room.quiz_id)?.title;
+            if (!quizTitle) {
+              const { data } = await supabase
+                .from('quizzes')
+                .select('title')
+                .eq('id', room.quiz_id)
+                .single();
+              quizTitle = data?.title || 'Kuis';
+            }
+            const position = rankedPlayers.findIndex((p) => p.user_id === uid) + 1;
+            const { error: ie } = await supabase.from('match_history').insert({
+              user_id: uid,
+              quiz_id: room.quiz_id,
+              quiz_title: quizTitle,
+              position: position || 1,
+              total_players: rankedPlayers.length,
+              time_ms: elapsed,
+              correct_count: me?.correct_count || 0,
+            });
+            if (!ie) refreshHistory();
+          } catch {}
+        })();
+      }
+    }
+  }, [me?.finished_at, room?.status]);
+
   // Bot baru mulai berlari setelah hitung mundur selesai
   useEffect(() => {
     if (
@@ -919,18 +1084,6 @@ export default function App() {
   }, [room?.status, localBots.length, showResults, raceReady]);
 
   useEffect(() => {
-    if (room?.status === 'racing' && me?.finished_at) {
-      setShowResults(true);
-      if (!finishedRef.current) {
-        finishedRef.current = true;
-        setFinalMs(raceStartTime ? Date.now() - raceStartTime : 0);
-        setShowCongrats(true); // selamat dulu, baru podium
-        fx('finish');
-      }
-    }
-  }, [me?.finished_at, room?.status, soundOn]);
-
-  useEffect(() => {
     if (!configured) return;
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session) {
@@ -968,20 +1121,21 @@ export default function App() {
     return () => subscription.unsubscribe();
   }, [refreshQuizzes]);
 
-  const handleAuth = async (e) => {
+    const handleAuth = async (e) => {
     e.preventDefault();
     if (!emailInput || !passwordInput)
       return setError('Email dan Password wajib diisi.');
     const email = emailInput.trim().toLowerCase();
     const emailErr = validateEmail(email);
     if (emailErr) return setError(emailErr);
-    if (authMode === 'register' && passwordInput.length < 8)
-      return setError('Password minimal 8 karakter.');
+    if (authMode === 'register') {
+      const pwdErr = validatePassword(passwordInput);
+      if (pwdErr) return setError(pwdErr);
+    }
     return run(async () => {
       if (authMode === 'login') {
         const { error } = await supabase.auth.signInWithPassword({
-          email,
-          password: passwordInput,
+          email, password: passwordInput,
         });
         if (error) {
           if (error.message.includes('Invalid login credentials'))
@@ -990,8 +1144,7 @@ export default function App() {
         }
       } else {
         const { data, error } = await supabase.auth.signUp({
-          email,
-          password: passwordInput,
+          email, password: passwordInput,
           options: { data: { name: email.split('@')[0] } },
         });
         if (error) throw error;
@@ -1243,18 +1396,21 @@ export default function App() {
   ]);
 
   const enterRoom = async (id) => {
+    // reset state balapan agar quiz yang sama bisa dimainkan ulang
+    finishedRef.current = false;
+    countdownStartedRef.current = false;
+    setShowResults(false);
+    setShowCongrats(false);
+    setFinalMs(0);
+    setCountdown(null);
+    setRaceReady(false);
+    setRaceStartTime(null);
+
     await refreshRoom(id);
     setStepHint('Tekan D atau klik LARI untuk berlari!');
     setScreen('room');
     setFeedback('');
-    // Pemain baru otomatis dapat panduan cara main di lobby
     if (!localStorage.getItem('catdash_howto_seen')) setShowHowTo(true);
-  };
-
-  const closeHowTo = () => {
-    setShowHowTo(false);
-    localStorage.setItem('catdash_howto_seen', 'true');
-    fx('click');
   };
 
   const saveQuiz = () =>
@@ -1396,17 +1552,25 @@ export default function App() {
         throw Error('Lengkapi nama dan pilih kuis.');
       localStorage.setItem('catdash_name', name.trim());
       const code = await rpc('create_game_room', {
-        p_quiz: selectedQuiz,
-        p_name: name.trim(),
-        p_cat: cat,
-        p_time_limit: timeLimit,
+        p_quiz: selectedQuiz, p_name: name.trim(), p_cat: cat, p_time_limit: timeLimit,
       });
       const { data, error: e } = await supabase
-        .from('rooms')
-        .select('id')
-        .eq('code', code)
-        .single();
+        .from('rooms').select('id').eq('code', code).single();
       if (e) throw e;
+
+      // Bot ditambahkan sekarang (di lobby) agar terlihat & otomatis hilang saat pemain asli masuk
+      if (botCount > 0) {
+        const newBots = Array.from({ length: botCount }).map((_, i) => ({
+          id: `bot-${i}`, user_id: `bot-${i}`,
+          nickname: `Bot ${LABELS[CATS[i % 4]]}`,
+          cat: CATS[i % 4], distance: 0, energy: 100,
+          needs_quiz: false, correct_count: 0, wrong_count: 0, finished_at: null,
+        }));
+        setLocalBots(newBots);
+      } else {
+        setLocalBots([]);
+      }
+
       await enterRoom(data.id);
       fx('start');
     });
@@ -1428,21 +1592,6 @@ export default function App() {
   const startGame = () =>
     run(async () => {
       await rpc('start_game_room', { p_room: room.id });
-      if (botCount > 0) {
-        const newBots = Array.from({ length: botCount }).map((_, i) => ({
-          id: `bot-${i}`,
-          user_id: `bot-${i}`,
-          nickname: `Bot ${LABELS[CATS[i % 4]]}`,
-          cat: CATS[i % 4],
-          distance: 0,
-          energy: 100,
-          needs_quiz: false,
-          correct_count: 0,
-          wrong_count: 0,
-          finished_at: null,
-        }));
-        setLocalBots(newBots);
-      }
       await refreshRoom(room.id);
       fx('start');
     });
@@ -1639,8 +1788,9 @@ export default function App() {
         sambil menekan D untuk melangkah lebih jauh, tapi energi lebih boros.
       </li>
       <li>
-        Setiap langkah memakai energi ⚡. Kalau energi habis, kamu harus{' '}
-        <b>menjawab soal kuis</b>.
+        <b>Bot</b> adalah lawan latihan. Kalau ada <b>pemain asli</b> yang masuk
+        room, bot akan otomatis <b>dihapus di semua device</b> supaya kamu bisa
+        bertanding dengan pemain sungguhan.
       </li>
       <li>
         Jawaban <b>benar</b> = energi penuh lagi. Jawaban <b>salah</b> atau
@@ -1818,17 +1968,25 @@ export default function App() {
         </div>
       </header>
 
-      {error && (
-        <div className="alert">
-          ⚠ {error}
-          <button onClick={() => setError('')}>×</button>
-        </div>
-      )}
-      {feedback && (
-        <div className="notice" onClick={() => setFeedback('')}>
-          {feedback} ×
-        </div>
-      )}
+      <div className="toast-container">
+        {error && (
+          <div className="toast toast-error">
+            <span>⚠ {error}</span>
+            <button onClick={() => setError('')}>×</button>
+          </div>
+        )}
+        {feedback && (
+          <div className="toast toast-info" onClick={() => setFeedback('')}>
+            <span>{feedback}</span>
+            <button onClick={() => setFeedback('')}>×</button>
+          </div>
+        )}
+        {toasts.map((t) => (
+          <div key={t.id} className={`toast toast-${t.type}`}>
+            <span>{t.message}</span>
+          </div>
+        ))}
+      </div>
 
       {/* AUTH */}
       {screen === 'auth' && (
@@ -1866,12 +2024,25 @@ export default function App() {
               <label>
                 Password
                 <input
-                  type="password"
+                  type={showPassword ? 'text' : 'password'}
                   value={passwordInput}
                   onChange={(e) => setPasswordInput(e.target.value)}
                   placeholder="••••••••"
                   required
                 />
+                <button
+                  type="button"
+                  className="linkBtn"
+                  style={{ marginTop: '6px', fontSize: '12px' }}
+                  onClick={() => setShowPassword((v) => !v)}
+                >
+                  {showPassword ? 'Sembunyikan password' : '👁 Lihat password'}
+                </button>
+                {authMode === 'register' && (
+                  <small className="fieldHint">
+                    Minimal 8 karakter, mengandung huruf besar, huruf kecil, dan angka.
+                  </small>
+                )}
               </label>
               <button
                 type="submit"
@@ -1956,6 +2127,34 @@ export default function App() {
               />
               <span>Tampilkan pesan selamat datang saat membuka aplikasi</span>
             </label>
+          </div>
+
+          <div className="history-card-wrap" id="tour-riwayat">
+            <h3 style={{ marginTop: '25px' }}>📜 Riwayat Bermain</h3>
+            <p className="muted" style={{ marginTop: '-6px', fontSize: '12px' }}>
+              Otomatis dihapus jika sudah lebih dari 1 minggu.
+            </p>
+            {history.length === 0 ? (
+              <p className="muted">Belum ada riwayat. Mainkan game untuk melihatnya di sini.</p>
+            ) : (
+              <div className="history-list">
+                {history.map((h) => (
+                  <div key={h.id} className="history-item">
+                    <div className="between">
+                      <b>{h.quiz_title}</b>
+                      <small>
+                        {new Date(h.played_at).toLocaleDateString('id-ID')}
+                      </small>
+                    </div>
+                    <div className="history-meta">
+                      <span>🏆 Posisi {h.position}/{h.total_players}</span>
+                      <span>⏱ {formatTime(h.time_ms)}</span>
+                      <span>✅ {h.correct_count} benar</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           <div className="actions" style={{ marginTop: '30px' }}>
@@ -2323,16 +2522,20 @@ export default function App() {
                 Pemain siap: <b>{players.length}/10</b>
               </p>
               <div className="playerGrid">
-                {players.map((p) => (
-                  <div className="playerCard" key={p.id}>
-                    <div className="lobbyCatFrame">
-                      <Cat cat={p.cat} size={96} />
+                {allPlayersRaw.map((p) => {
+                  const isBot = String(p.id).startsWith('bot-');
+                  return (
+                    <div className="playerCard" key={p.id}>
+                      <div className="lobbyCatFrame">
+                        <Cat cat={p.cat} size={96} />
+                      </div>
+                      <b>{p.nickname}</b>
+                      {p.user_id === room.host_id && <small>HOST</small>}
+                      {isBot && <small>BOT</small>}
+                      {p.user_id === uid && <small>KAMU</small>}
                     </div>
-                    <b>{p.nickname}</b>
-                    {p.user_id === room.host_id && <small>HOST</small>}
-                    {p.user_id === uid && <small>KAMU</small>}
-                  </div>
-                ))}
+                  );
+                })}
               </div>
 
               <div className="howto-card">
@@ -2677,8 +2880,15 @@ export default function App() {
                 </div>
               </div>
               <div className="raceMeta">
-                {rankedPlayers.length} PEMAIN/BOT • TEKAN D: MAJU • SHIFT:
-                SPRINT<span className="stepHint">{stepHint}</span>
+                {players.length} pemain
+                {localBots.length > 0 && ` + ${localBots.length} bot`}
+                {' '}• TEKAN D: MAJU • SHIFT: SPRINT
+                {localBots.length > 0 && (
+                  <span style={{ display: 'block', marginTop: '4px', color: 'var(--terra)' }}>
+                    ℹ Bot akan hilang otomatis jika ada pemain asli yang bergabung.
+                  </span>
+                )}
+                <span className="stepHint">{stepHint}</span>
               </div>
             </>
           )}
@@ -2876,7 +3086,7 @@ export default function App() {
           </div>
         )}
 
-      <footer>CAT DASH • Multiplayer Quiz Race • React + Supabase</footer>
+      <footer>CAT DASH • Multiplayer Quiz Race</footer>
     </main>
   );
 }
