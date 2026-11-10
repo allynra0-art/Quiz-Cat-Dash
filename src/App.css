@@ -1263,3 +1263,21 @@ footer { text-align: center; color: var(--text-muted); font-size: 12px; margin: 
   .hero-desc { padding: 20px 16px; font-size: 15px; }
   .heroTagline { font-size: 11px; letter-spacing: 2px; }
 }
+
+/* =====================================================
+   PATCH v8 - LINTASAN HP: ukuran kucing mengikuti jumlah pemain
+   TEMPELKAN DI PALING BAWAH App.css (setelah patch 1-6)
+   (Ukuran & posisi lintasan sekarang diatur langsung dari App.jsx,
+    jadi patch ini hanya penyempurna.)
+   ===================================================== */
+   @media (max-width: 650px) {
+    .raceCat .cat,
+    .myRaceCat .cat {
+      width: var(--cat-size, 42px) !important;
+      height: var(--cat-size, 42px) !important;
+    }
+    /* nama pemain sudah ada di label lintasan, jadi nama di samping kucing disembunyikan */
+    .rivalName { display: none; }
+    .runnerTrackName { left: auto; right: 42px; top: 2px; }
+  }
+  

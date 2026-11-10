@@ -432,6 +432,13 @@ export default function App() {
   const quizTimeoutRef = useRef(false);
   const prefetchRef = useRef({ key: '', q: null });
 
+  // Antrean langkah ke server: SEMUA ketukan dikirim berurutan, tidak ada yang hilang.
+  const moveChainRef = useRef(Promise.resolve());
+  // Naik setiap kali kondisi pemain berubah di layar; dipakai membuang data server yang sudah basi.
+  const localVerRef = useRef(0);
+  // Cegah refresh room menumpuk (realtime + polling + jawaban sekaligus)
+  const refreshStateRef = useRef({ running: false, again: false, force: false, promise: null });
+
   const allPlayersRaw = [...players, ...localBots];
   const rankedPlayers = [...allPlayersRaw].sort((a, b) => {
     const af = a.finished_at ? new Date(a.finished_at).getTime() : Infinity;
@@ -473,11 +480,17 @@ export default function App() {
       : 'Kamu berhasil sampai garis finish! Terus berlatih ya! 💪';
 
   // Tinggi area balapan menyesuaikan jumlah lintasan supaya tidak ada kucing yang terpotong
-  const sceneryMinHeight = isMobile
-    ? MOBILE_LANES_TOP +
-      lanePlayers.length * (MOBILE_LANE_HEIGHT + MOBILE_LANE_GAP) +
-      12
-    : LANES_TOP + lanePlayers.length * (LANE_HEIGHT + LANE_GAP) + 16;
+  // Geometri lintasan dihitung di sini dan dipasang INLINE, jadi tidak bergantung pada urutan
+  // tempelan CSS. Makin banyak pemain, lintasan makin ramping supaya semuanya tetap muat di HP.
+  const laneCount = lanePlayers.length;
+  const geo = isMobile
+    ? laneCount <= 5
+      ? { top: 92, h: 50, gap: 5, cat: 42, me: 48 }
+      : laneCount <= 8
+      ? { top: 84, h: 40, gap: 4, cat: 34, me: 40 }
+      : { top: 76, h: 32, gap: 3, cat: 28, me: 34 }
+    : { top: LANES_TOP, h: LANE_HEIGHT, gap: LANE_GAP, cat: 46, me: 56 };
+  const sceneryMinHeight = geo.top + laneCount * (geo.h + geo.gap) + 12;
 
   const fx = (type) => sound(type, soundOn);
   const rpc = async (fn, args) => {
@@ -734,8 +747,9 @@ export default function App() {
       fx('correct');
     });
 
-  const refreshRoom = useCallback(async (id) => {
+  const doRefreshRoom = useCallback(async (id, force) => {
     if (!supabase || !id) return;
+    const ver = localVerRef.current;
     const [r, p] = await Promise.all([
       supabase
         .from('rooms')
@@ -750,9 +764,14 @@ export default function App() {
     ]);
     if (r.error) throw r.error;
     if (p.error) throw p.error;
-    setRoom(r.data);
+    setRoom((prev) =>
+      prev && JSON.stringify(prev) === JSON.stringify(r.data) ? prev : r.data
+    );
+    // Kalau layar berubah saat permintaan ini berjalan, datanya sudah basi: buang.
+    if (!force && ver !== localVerRef.current) return;
     setPlayers((prevPlayers) => {
       const serverPlayers = p.data || [];
+      if (force) return serverPlayers;
       return serverPlayers.map((sp) => {
         const lp = prevPlayers.find((x) => x.id === sp.id);
         if (lp && lp.distance > sp.distance && !sp.finished_at) {
@@ -768,6 +787,35 @@ export default function App() {
     });
   }, []);
 
+  // Hanya satu refresh berjalan sekaligus; permintaan yang menumpuk digabung jadi satu susulan.
+  const refreshRoom = useCallback(
+    (id, force = false) => {
+      if (!supabase || !id) return Promise.resolve();
+      const st = refreshStateRef.current;
+      if (st.running) {
+        st.again = true;
+        st.force = st.force || force;
+        return st.promise;
+      }
+      st.running = true;
+      st.promise = (async () => {
+        try {
+          let f = force;
+          do {
+            st.again = false;
+            await doRefreshRoom(id, f);
+            f = st.force;
+            st.force = false;
+          } while (st.again);
+        } finally {
+          st.running = false;
+        }
+      })();
+      return st.promise;
+    },
+    [doRefreshRoom]
+  );
+
   const advancePlayer = async () => {
     if (
       !room?.id ||
@@ -780,8 +828,9 @@ export default function App() {
       showResults
     )
       return;
-    const step = moveRef.current.sprinting ? 15 : 6;
-    const cost = moveRef.current.sprinting ? 35 : 20;
+    const sprint = moveRef.current.sprinting;
+    const step = sprint ? 15 : 6;
+    const cost = sprint ? 35 : 20;
     setPlayers((prev) =>
       prev.map((p) => {
         if (p.user_id === uid) {
@@ -801,24 +850,12 @@ export default function App() {
         return p;
       })
     );
-    if (moveRef.current.sendingStep) {
-      moveRef.current.pendingStep = true;
-      return;
-    }
-    moveRef.current.sendingStep = true;
-    try {
-      await rpc('move_cat', {
-        p_room: room.id,
-        p_sprint: moveRef.current.sprinting,
-      });
-    } catch (e) {
-    } finally {
-      moveRef.current.sendingStep = false;
-      if (moveRef.current.pendingStep) {
-        moveRef.current.pendingStep = false;
-        advancePlayer();
-      }
-    }
+    localVerRef.current += 1;
+    const roomId = room.id;
+    // masuk antrean: dikirim berurutan, tidak ada langkah yang dibuang
+    moveChainRef.current = moveChainRef.current
+      .then(() => rpc('move_cat', { p_room: roomId, p_sprint: sprint }))
+      .catch(() => {});
   };
 
   const pressRunKey = () => {
@@ -1154,10 +1191,10 @@ export default function App() {
       !busyRef.current &&
       !showResults
     ) {
-      quizTimeoutRef.current = true;
-      answerRef.current?.('WAKTU_HABIS');
+      // hanya ditandai terkirim kalau jawaban benar-benar dimulai; kalau tidak, coba lagi
+      if (answerRef.current?.('WAKTU_HABIS')) quizTimeoutRef.current = true;
     }
-  }, [quizSeconds, question, showResults]);
+  }, [quizSeconds, question, showResults, busy]);
 
   useEffect(() => {
     const down = (e) => {
@@ -1414,16 +1451,19 @@ export default function App() {
   const answer = (val) => {
     if (busyRef.current) return;
     
-    // Ubah 'WAKTU_HABIS' menjadi -1 agar tidak error di database Supabase
+    // Waktu habis dikirim sebagai teks 'WAKTU_HABIS' (angka -1 bisa bentrok dengan jawaban isian yang sah)
     const isTimeout = val === 'WAKTU_HABIS';
-    const p_answer = isTimeout ? -1 : val;
+    const p_answer = isTimeout ? 'WAKTU_HABIS' : String(val);
 
     return run(async () => {
       try {
+        // pastikan semua langkah sudah diterima server sebelum menjawab
+        await moveChainRef.current;
         const ok = await rpc('answer_game_question', {
           p_room: room.id,
-          p_answer: p_answer, // Kirim sebagai angka
+          p_answer: p_answer,
         });
+        localVerRef.current += 1;
         
         if (ok) {
           setFeedback('BENAR! Energi Penuh!');
@@ -1469,8 +1509,19 @@ export default function App() {
         // tidak ditunggu: jawaban langsung terasa selesai, data room menyusul di latar belakang
         refreshRoom(room.id).catch(() => {});
       } catch (e) {
-        setFeedback('Terjadi kesalahan sistem.');
-        setError(msg(e));
+        // Layar & server tidak sinkron (soal sudah tidak aktif di server): ambil ulang data
+        // dari server supaya pemain tidak macet.
+        localVerRef.current += 1;
+        setQuestion(null);
+        quizKey.current = '';
+        prefetchRef.current = { key: '', q: null };
+        refreshRoom(room.id, true).catch(() => {});
+        if (!String(msg(e)).includes('Tidak ada soal')) {
+          setFeedback('Terjadi kesalahan sistem.');
+          setError(msg(e));
+        } else {
+          setFeedback('Data disinkronkan ulang, lanjutkan bermain!');
+        }
       }
     });
   };
@@ -1556,6 +1607,7 @@ export default function App() {
     setShowResults(false);
     finishedRef.current = false;
     setReviewData(null);
+    moveChainRef.current = Promise.resolve();
     setShowHowTo(false);
     setCountdown(null);
     setRaceReady(false);
@@ -2475,19 +2527,25 @@ export default function App() {
 
                 <div
                   className="raceScenery"
-                  style={{ minHeight: `${sceneryMinHeight}px` }}
+                  style={{
+                    height: `${sceneryMinHeight}px`,
+                    minHeight: `${sceneryMinHeight}px`,
+                  }}
                 >
                   <div className="mountainRange" />
                   <div className="sakuraTree treeOne">🌸</div>
                   <div className="sakuraTree treeTwo">🌸</div>
                   <div className="pagoda">🏯</div>
                   <div className="fenceLine" />
-                  <div className="raceLanes">
+                  <div
+                    className="raceLanes"
+                    style={{ top: geo.top, bottom: 8, gap: geo.gap }}
+                  >
                     {lanePlayers.map((p) => {
                       const mine = p.user_id === uid;
                       const progress = Math.min(
                         88,
-                        Math.max(3, (Number(p.distance) / 300) * 88)
+                        Math.max(isMobile ? 9 : 3, (Number(p.distance) / 300) * 88)
                       );
                       const moving = Number(p.distance) > 0;
                       const action = p.finished_at
@@ -2503,6 +2561,11 @@ export default function App() {
                             mine ? 'myRunnerLane' : ''
                           }`}
                           key={p.id}
+                          style={{
+                            flex: `0 0 ${geo.h}px`,
+                            height: geo.h,
+                            minHeight: geo.h,
+                          }}
                         >
                           <div className="laneDecor" />
                           <span className="runnerTrackName">
@@ -2512,10 +2575,16 @@ export default function App() {
                             className={`raceCat ${
                               mine ? 'myRaceCat' : 'rivalCat'
                             }`}
-                            style={{ left: `${progress}%` }}
+                            style={{
+                              left: `${progress}%`,
+                              '--cat-size': `${mine ? geo.me : geo.cat}px`,
+                            }}
                           >
                             {mine ? (
-                              <div className="youPointer">
+                              <div
+                                className="youPointer"
+                                style={{ bottom: geo.me - 4 }}
+                              >
                                 <span className="youTag">KAMU</span>
                                 <span className="youArrow">▼</span>
                               </div>
@@ -2525,14 +2594,19 @@ export default function App() {
                             <Cat
                               cat={p.cat}
                               action={action}
-                              size={mine ? 56 : 46}
+                              size={mine ? geo.me : geo.cat}
                             />
                           </div>
                         </div>
                       );
                     })}
                   </div>
-                  <div className="finishBanner">🏁</div>
+                  <div
+                    className="finishBanner"
+                    style={{ top: geo.top, bottom: 8 }}
+                  >
+                    🏁
+                  </div>
                 </div>
 
                 <div className="raceBottomHud">
