@@ -1460,6 +1460,43 @@ export default function App() {
     return () => clearTimeout(id);
   }, [room?.status, me?.needs_quiz, question?.number, showResults]);
 
+  // Penyelamat macet: energi di layar sudah habis tapi soal tidak muncul (layar dan server
+  // sempat berselisih sedikit). Kita minta server menghabiskan sisa energinya, lalu ambil
+  // ulang datanya, sehingga soal pasti muncul. Berhenti sendiri begitu keadaan normal lagi.
+  const stuckNoQuiz =
+    screen === 'room' &&
+    room?.status === 'racing' &&
+    raceReady &&
+    !!me &&
+    !me.needs_quiz &&
+    !me.finished_at &&
+    !showResults &&
+    Number(me.energy) < 1;
+  useEffect(() => {
+    if (!stuckNoQuiz || !room?.id) return;
+    const roomId = room.id;
+    let alive = true;
+    const fix = async () => {
+      try {
+        await moveChainRef.current;
+        await rpc('move_cat', { p_room: roomId, p_sprint: false });
+      } catch (e) {
+        /* abaikan, dicoba lagi */
+      }
+      if (alive && activeRoomRef.current === roomId) {
+        localVerRef.current += 1;
+        refreshRoom(roomId, true).catch(() => {});
+      }
+    };
+    const t0 = setTimeout(fix, 700);
+    const iv = setInterval(fix, 1800);
+    return () => {
+      alive = false;
+      clearTimeout(t0);
+      clearInterval(iv);
+    };
+  }, [stuckNoQuiz, room?.id]);
+
   // Waktu menjawab baru berjalan setelah jeda selesai
   useEffect(() => {
     if (
