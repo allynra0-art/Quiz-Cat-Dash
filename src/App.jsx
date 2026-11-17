@@ -1,42 +1,70 @@
 import './App.css';
+import './App.v3.css';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { supabase, configured } from './supabase';
+import { Cat, Avatar, CATS, LABELS, AVATAR_COLORS, AVATAR_COLOR_NAMES } from './Cat';
+import Entrance from './Entrance';
+import QuizPanel from './QuizPanel';
+import QuestionEditor from './QuestionEditor';
+import { FriendsScreen, InvitePanel, InviteDock, MAX_FRIENDS } from './Friends';
+import {
+  QTYPE_BY_ID,
+  SAMPLE_QUESTIONS,
+  SAMPLE_QUIZ_TITLE,
+  answerText,
+  blankQuestion,
+  fromRow,
+  toRow,
+  validateQuestion,
+} from './questions';
 
-const CATS = ['orange', 'white', 'black', 'gray'];
-const LABELS = {
-  orange: 'Oren',
-  white: 'Putih',
-  black: 'Hitam',
-  gray: 'Abu-abu',
-};
+// Jeda (ms) saat soal muncul: tombol jawaban terkunci supaya ketukan beruntun dari
+// tombol LARI tidak ikut menjawab soal.
+const QUIZ_LOCK_MS = 1300;
+const TRACKS = [
+  { m: 300, label: 'Pendek' },
+  { m: 600, label: 'Sedang' },
+  { m: 1000, label: 'Panjang' },
+  { m: 1500, label: 'Maraton' },
+];
 
-// ALUR TUTORIAL: Home -> Create -> Host -> Join -> Profile
+// ALUR TUTORIAL: Home -> Buat Kuis -> Main Bersama -> Gabung -> Profil -> Teman
+// member: true = hanya tampil untuk pemain yang punya akun (tamu tidak melihat langkah ini)
 const TOUR_FLOWS = {
   home: [
     {
       id: 'tour-btn-suara',
-      title: 'Atur Suara 🔊',
+      title: 'Atur Suara',
       desc: 'Klik di sini untuk menyalakan/mematikan suara. Jika tidak ada suara, klik 2x.',
     },
     {
       id: 'tour-btn-kuis',
-      title: 'Buat Kuis ✎',
-      desc: 'Klik di sini untuk mulai membuat soal kuis baru.',
+      title: 'Buat Kuis',
+      desc: 'Klik di sini untuk membuat kuis sendiri. Satu kuis bisa berisi 5 tipe soal sekaligus.',
+      member: true,
     },
     {
       id: 'tour-btn-bersama',
-      title: 'Main Bersama 📚',
-      desc: 'Klik ini untuk bikin room, pilih kucing, dan main dengan teman.',
+      title: 'Main Bersama',
+      desc: 'Klik ini untuk bikin room, pilih kucing, atur panjang lintasan, lalu main dengan teman.',
+      member: true,
     },
     {
       id: 'tour-btn-gabung',
-      title: 'Gabung Room ⌨️',
-      desc: 'Punya kode 6 digit dari teman? Klik di sini buat masuk.',
+      title: 'Gabung Room',
+      desc: 'Punya kode 6 digit dari teman? Klik di sini buat masuk. Tamu juga bisa memakai tombol ini.',
+    },
+    {
+      id: 'tour-btn-teman',
+      title: 'Teman',
+      desc: 'Tambah teman lewat kode, lihat siapa yang online, dan undang mereka ke room-mu. Maksimal 20 teman.',
+      member: true,
     },
     {
       id: 'tour-btn-profil',
-      title: 'Profil 👤',
-      desc: 'Klik ikon ini untuk mengubah nama, melihat Riwayat Bermain (hasil balapanmu 7 hari terakhir), atau keluar dari akun.',
+      title: 'Profil',
+      desc: 'Klik ikon ini untuk mengganti avatar kucing, nama, melihat Riwayat Bermain 7 hari terakhir, atau keluar.',
+      member: true,
     },
   ],
   create: [
@@ -46,18 +74,23 @@ const TOUR_FLOWS = {
       desc: 'Mulai dengan memberi judul pada kuis buatanmu.',
     },
     {
+      id: 'tour-tipe-soal',
+      title: 'Pilih Tipe Soal',
+      desc: 'Ada 5 tipe. Pilihan Ganda: 4 opsi. Benar/Salah: nilai sebuah pernyataan. Isian Singkat: pemain mengetik jawaban. Acak Kata: pemain menyusun huruf yang diacak. Sambung Kata: pemain mengetik kata yang diawali huruf terakhir kata awal. Setiap soal boleh beda tipe, jadi satu permainan bisa berisi semuanya.',
+    },
+    {
       id: 'tour-input-soal',
-      title: 'Tulis Pertanyaan',
-      desc: 'Ketik soal pilihan ganda di sini. Isi 4 pilihan jawaban di bawahnya, lalu tandai jawaban yang benar.',
+      title: 'Tulis Soalnya',
+      desc: 'Isi pertanyaan, lalu lengkapi jawabannya. Isiannya menyesuaikan tipe soal yang kamu pilih. Untuk Sambung Kata, tulis kata awalnya (misal MEJA) dan daftar kata yang benar (diawali huruf A).',
     },
     {
       id: 'tour-btn-hapus-soal',
-      title: 'Hapus Soal 🗑',
+      title: 'Hapus Soal',
       desc: 'Salah buat soal? Klik tombol ini untuk menghapusnya.',
     },
     {
       id: 'tour-btn-tambah-soal',
-      title: 'Tambah Soal ➕',
+      title: 'Tambah Soal',
       desc: 'Klik untuk menambah soal baru (maksimal 50 soal).',
     },
     {
@@ -69,33 +102,43 @@ const TOUR_FLOWS = {
   host: [
     {
       id: 'tour-pilih-kucing',
-      title: 'Pilih Kucing 🐾',
-      desc: 'Pilih karakter kucing yang mau kamu pakai.',
+      title: 'Pilih Kucing',
+      desc: 'Pilih karakter kucing yang mau kamu pakai di balapan ini.',
     },
     {
       id: 'tour-pilih-kuis',
       title: 'Pilih Kuis',
-      desc: 'Pilih kuis yang mau dimainkan. Sudah ada "Simulasi Kuis" yang siap dipakai untuk mencoba.',
+      desc: 'Pilih kuis yang mau dimainkan. Sudah ada "Simulasi Kuis" berisi semua tipe soal untuk mencoba.',
     },
     {
       id: 'tour-btn-edit-kuis',
-      title: 'Edit Kuis ✏️',
+      title: 'Edit Kuis',
       desc: 'Mau ubah soal atau jawaban? Pilih kuisnya, klik tombol ini, ubah isinya, lalu tekan "Simpan Perubahan".',
     },
     {
       id: 'tour-input-bot',
-      title: 'Lawan Bot 🤖',
+      title: 'Lawan Bot',
       desc: 'Isi angka 0-5. Bot akan otomatis hilang jika ada pemain asli yang bergabung ke room.',
     },
     {
       id: 'tour-input-timer',
-      title: 'Waktu Kuis ⏱️',
-      desc: 'Atur berapa detik waktu untuk menjawab setiap soal (5-60 detik).',
+      title: 'Waktu Kuis',
+      desc: 'Atur berapa detik waktu untuk menjawab setiap soal (5-60 detik). Waktu mulai berjalan setelah jeda singkat "Bersiap".',
+    },
+    {
+      id: 'tour-input-jarak',
+      title: 'Panjang Lintasan',
+      desc: 'Pilih Pendek (300 m) sampai Maraton (1500 m). Makin panjang, makin sering pemain harus menjawab soal.',
+    },
+    {
+      id: 'tour-input-wajib',
+      title: 'Wajib Jawab Benar',
+      desc: 'Atur berapa soal yang harus dijawab benar sebelum boleh finish. Dengan ini, kuis 50 soal tidak bisa dimenangkan hanya dengan 5 jawaban. Isi 0 kalau tidak mau ada syarat.',
     },
     {
       id: 'tour-btn-buat-room',
       title: 'Buat Room',
-      desc: 'Klik di sini untuk membuat kode room dan mulai bermain.',
+      desc: 'Klik di sini untuk membuat kode room. Di lobby kamu bisa mengundang teman langsung dari daftar temanmu.',
     },
   ],
   join: [
@@ -112,35 +155,72 @@ const TOUR_FLOWS = {
   ],
   profile: [
     {
+      id: 'tour-avatar',
+      title: 'Avatar',
+      desc: 'Pilih kucing dan warna bingkai untuk foto profilmu. Teman-temanmu akan melihatnya, dan kucing ini jadi pilihan awalmu saat bermain.',
+      member: true,
+    },
+    {
       id: 'tour-input-nama',
       title: 'Ubah Nickname',
       desc: 'Ketik nama barumu di sini.',
+      member: true,
     },
     {
       id: 'tour-btn-simpan-profil',
       title: 'Simpan Nama',
       desc: 'Klik untuk menyimpan perubahan nama.',
+      member: true,
     },
     {
       id: 'tour-riwayat',
-      title: 'Riwayat Bermain 📜',
-      desc: 'Ini daftar riwayat balapanmu. Setiap selesai main, hasilnya tersimpan otomatis: judul kuis, posisi akhir (misal 2/5), waktu tempuh, dan jumlah jawaban benar. Yang terbaru ada di paling atas, dan riwayat lebih dari 1 minggu akan terhapus sendiri. Kalau masih kosong, mainkan satu balapan sampai finish dulu.',
+      title: 'Riwayat Bermain',
+      desc: 'Setiap selesai main, hasilnya tersimpan otomatis: judul kuis, posisi akhir, waktu tempuh, dan jumlah jawaban benar. Riwayat lebih dari 1 minggu terhapus sendiri.',
+      member: true,
     },
     {
       id: 'tour-btn-logout',
       title: 'Keluar',
       desc: 'Klik di sini jika ingin keluar atau ganti akun.',
+      member: true,
+    },
+  ],
+  friends: [
+    {
+      id: 'tour-kode-saya',
+      title: 'Kode Temanmu',
+      desc: 'Ini kode unikmu. Kirim ke temanmu supaya mereka bisa menambahkanmu. Klik untuk menyalin.',
+      member: true,
+    },
+    {
+      id: 'tour-tambah-teman',
+      title: 'Tambah Teman',
+      desc: 'Masukkan kode teman (6 huruf) lalu kirim. Kalau dia juga sudah mengirim permintaan, kalian langsung berteman. Maksimal 20 teman.',
+      member: true,
+    },
+    {
+      id: 'tour-daftar-teman',
+      title: 'Daftar Teman',
+      desc: 'Titik hijau di foto berarti temanmu sedang online. Saat kamu berada di lobby room, tombol UNDANG akan muncul di sini untuk mengajak mereka bermain.',
+      member: true,
     },
   ],
 };
 
+const tourSteps = (flow, guest) =>
+  (TOUR_FLOWS[flow] || []).filter((st) => !(guest && st.member));
+
 // URUTAN PINDAH HALAMAN TUTORIAL
-const NEXT_TOUR_FLOW = {
+const NEXT_TOUR_MEMBER = {
   home: { screen: 'create', label: 'Buat Kuis' },
   create: { screen: 'host', label: 'Main Bersama' },
   host: { screen: 'join', label: 'Gabung Room' },
   join: { screen: 'profile', label: 'Profil' },
+  profile: { screen: 'friends', label: 'Teman' },
 };
+const NEXT_TOUR_GUEST = { home: { screen: 'join', label: 'Gabung Room' } };
+const nextTour = (flow, guest) =>
+  (guest ? NEXT_TOUR_GUEST : NEXT_TOUR_MEMBER)[flow] || null;
 
 // Ukuran lintasan (harus sama dengan CSS patch)
 const LANE_HEIGHT = 64;
@@ -151,18 +231,11 @@ const MOBILE_LANE_GAP = 5;
 const MOBILE_LANES_TOP = 92;
 const MOBILE_QUERY = '(max-width: 650px)';
 
-let questionKeySeed = 0;
-const blank = () => ({
-  _key: ++questionKeySeed, // key stabil supaya hapus soal tidak mengacak form
-  prompt: '',
-  type: 'pg', // sekarang hanya pilihan ganda
-  options: ['', '', '', ''],
-  correct_index: 0,
-});
+const blank = blankQuestion;
 const msg = (e) => e?.message || String(e);
 
 // ===== VALIDASI EMAIL: hanya email penyedia resmi / sekolah yang boleh masuk =====
-const ALLOW_GUEST = false; // true = tampilkan lagi tombol "Main sebagai Tamu"
+const ALLOW_GUEST = true; // tamu: hanya boleh ikut bermain (butuh "Allow anonymous sign-ins" di Supabase)
 const ALLOWED_EMAIL_DOMAINS = [
   'gmail.com',
   'googlemail.com',
@@ -195,35 +268,20 @@ function validateEmail(email) {
   return '';
 }
 
+const PASSWORD_RULES = [
+  { label: 'Minimal 8 karakter', test: (p) => p.length >= 8 },
+  { label: 'Ada huruf BESAR (A-Z)', test: (p) => /[A-Z]/.test(p) },
+  { label: 'Ada huruf kecil (a-z)', test: (p) => /[a-z]/.test(p) },
+  { label: 'Ada angka (0-9)', test: (p) => /[0-9]/.test(p) },
+];
+
 function validatePassword(pwd) {
-  if (pwd.length < 8) return 'Password minimal 8 karakter.';
-  if (!/[A-Z]/.test(pwd)) return 'Password harus mengandung minimal 1 huruf BESAR (A-Z).';
-  if (!/[a-z]/.test(pwd)) return 'Password harus mengandung minimal 1 huruf kecil (a-z).';
-  if (!/[0-9]/.test(pwd)) return 'Password harus mengandung minimal 1 angka (0-9).';
-  return '';
+  const missing = PASSWORD_RULES.filter((r) => !r.test(pwd)).map((r) => r.label.toLowerCase());
+  return missing.length ? `Password belum memenuhi syarat: ${missing.join(', ')}.` : '';
 }
 
 // ===== KUIS SIMULASI BAWAAN (otomatis dibuat untuk user yang belum punya kuis) =====
-// 15 soal pilihan ganda tingkat SD yang mudah. Posisi jawaban benar sudah diacak merata.
-const SAMPLE_QUIZ_TITLE = '🎮 Simulasi Kuis: Pengetahuan Umum';
-const SAMPLE_QUESTIONS = [
-  { type: 'pg', prompt: 'Berapa hasil 2 + 3?', options: ['4', '5', '6', '7'], correct_index: 1 },
-  { type: 'pg', prompt: 'Hewan yang suka mengeong adalah...', options: ['Kucing', 'Anjing', 'Ayam', 'Sapi'], correct_index: 0 },
-  { type: 'pg', prompt: 'Berapa jumlah hari dalam seminggu?', options: ['5', '6', '8', '7'], correct_index: 3 },
-  { type: 'pg', prompt: 'Matahari terbit dari arah...', options: ['Barat', 'Utara', 'Timur', 'Selatan'], correct_index: 2 },
-  { type: 'pg', prompt: 'Warna buah pisang yang sudah matang adalah...', options: ['Kuning', 'Biru', 'Hitam', 'Ungu'], correct_index: 0 },
-  { type: 'pg', prompt: 'Berapa hasil 10 - 4?', options: ['5', '7', '6', '8'], correct_index: 2 },
-  { type: 'pg', prompt: 'Hewan yang hidup di dalam air dan bernapas dengan insang adalah...', options: ['Kucing', 'Ikan', 'Burung', 'Kambing'], correct_index: 1 },
-  { type: 'pg', prompt: 'Ibu kota negara Indonesia adalah...', options: ['Bandung', 'Surabaya', 'Medan', 'Jakarta'], correct_index: 3 },
-  { type: 'pg', prompt: 'Berapa jumlah kaki seekor ayam?', options: ['2', '4', '6', '8'], correct_index: 0 },
-  { type: 'pg', prompt: 'Benda langit yang bersinar di malam hari adalah...', options: ['Matahari', 'Awan', 'Bulan', 'Pelangi'], correct_index: 2 },
-  { type: 'pg', prompt: 'Berapa hasil 5 x 2?', options: ['7', '10', '12', '15'], correct_index: 1 },
-  { type: 'pg', prompt: 'Alat yang dipakai untuk menulis di buku adalah...', options: ['Sendok', 'Sapu', 'Pensil', 'Payung'], correct_index: 2 },
-  { type: 'pg', prompt: 'Air yang sangat dingin akan berubah menjadi...', options: ['Es', 'Api', 'Asap', 'Pasir'], correct_index: 0 },
-  { type: 'pg', prompt: 'Berapa hasil 20 + 20?', options: ['30', '50', '60', '40'], correct_index: 3 },
-  { type: 'pg', prompt: 'Hewan yang bisa terbang adalah...', options: ['Burung', 'Kuda', 'Kerbau', 'Kelinci'], correct_index: 0 },
-];
-
+// 15 soal mudah yang memakai kelima tipe soal. Datanya ada di questions.js
 async function seedSampleQuiz(ownerId) {
   const { data, error } = await supabase
     .from('quizzes')
@@ -231,22 +289,29 @@ async function seedSampleQuiz(ownerId) {
     .select('id')
     .single();
   if (error) throw error;
-  const { error: qe } = await supabase.from('quiz_questions').insert(
-    SAMPLE_QUESTIONS.map((q, i) => ({
-      quiz_id: data.id,
-      position: i,
-      prompt: q.prompt,
-      type: q.type,
-      options: q.options,
-      correct_index: q.correct_index,
-    }))
-  );
+  const { error: qe } = await supabase
+    .from('quiz_questions')
+    .insert(SAMPLE_QUESTIONS.map((q, i) => ({ ...q, quiz_id: data.id, position: i })));
   if (qe) {
     await supabase.from('quizzes').delete().eq('id', data.id);
     throw qe;
   }
   return data.id;
 }
+
+const makeBots = (n) =>
+  Array.from({ length: n }).map((_, i) => ({
+    id: `bot-${i}`,
+    user_id: `bot-${i}`,
+    nickname: `Bot ${LABELS[CATS[i % 4]]}`,
+    cat: CATS[i % 4],
+    distance: 0,
+    energy: 100,
+    needs_quiz: false,
+    correct_count: 0,
+    wrong_count: 0,
+    finished_at: null,
+  }));
 
 const formatTime = (ms) => {
   const total = Math.max(0, Math.floor(Number(ms) || 0));
@@ -298,31 +363,6 @@ function sound(type, enabled) {
   } catch {}
 }
 
-function Cat({ cat = 'orange', action = 'idle', size = 88 }) {
-  const [failed, setFailed] = useState(false);
-  useEffect(() => setFailed(false), [cat, action]);
-  const src = `/assets/characters/cat_${cat}_${action}.png`;
-
-  return failed ? (
-    <span
-      className="catMissing"
-      style={{ width: size, height: size }}
-      aria-label="Sprite tidak ditemukan"
-    />
-  ) : (
-    <img
-      className="cat"
-      src={src}
-      alt={`Kucing ${LABELS[cat]}`}
-      width={size}
-      height={size}
-      style={{ width: size, height: size }}
-      draggable="false"
-      onError={() => setFailed(true)}
-    />
-  );
-}
-
 // Stopwatch dipisah jadi komponen sendiri supaya hanya angka ini yang di-render ulang
 // (dulu seluruh aplikasi di-render ulang ~27x per detik, itu penyebab utama lag)
 function RaceTimer({ startTime, running }) {
@@ -343,7 +383,7 @@ function RaceTimer({ startTime, running }) {
 
 export default function App() {
   const [uid, setUid] = useState(null);
-  const [screen, setScreen] = useState('home');
+  const [screen, setScreen] = useState('entrance');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -399,6 +439,27 @@ export default function App() {
   const [botCount, setBotCount] = useState(3);
   const [timeLimit, setTimeLimit] = useState(15);
   const [localBots, setLocalBots] = useState([]);
+  const botsWantedRef = useRef(0);
+  const [trackSetting, setTrackSetting] = useState(300); // panjang lintasan yang dipilih host
+  const [reqSetting, setReqSetting] = useState(0); // wajib jawab benar sebelum finish (0 = tanpa syarat)
+
+  // ===== PROFIL, TEMAN, UNDANGAN =====
+  const [profile, setProfile] = useState(null); // {display_name, avatar, avatar_color, friend_code}
+  const [dbReady, setDbReady] = useState(true); // false = SQL v3 belum dijalankan
+  const [friends, setFriends] = useState([]);
+  const [invites, setInvites] = useState([]);
+  const [invitedIds, setInvitedIds] = useState(() => new Set());
+  const [introPlayed, setIntroPlayed] = useState(false);
+  const [quizReady, setQuizReady] = useState(true); // false selama jeda "Bersiap"
+  const [quizRetry, setQuizRetry] = useState(0);
+  const uidRef = useRef(null);
+  const screenRef = useRef('entrance');
+  const racingRef = useRef(false);
+  const wantAuthRef = useRef(false);
+  const activeRoomRef = useRef(null);
+  const prevStatusRef = useRef(null);
+  const seenInvitesRef = useRef(new Set());
+  const seenRequestsRef = useRef(null);
 
   const [room, setRoom] = useState(null);
   const [players, setPlayers] = useState([]);
@@ -453,6 +514,7 @@ export default function App() {
   const localBotsRef = useRef([]);
   useEffect(() => { localBotsRef.current = localBots; }, [localBots]);
 
+  const lastMoveRef = useRef(0); // waktu langkah terakhir (meniru perhitungan server)
   const moveRef = useRef({
     sprinting: false,
     sendingStep: false,
@@ -470,7 +532,11 @@ export default function App() {
   // Naik setiap kali kondisi pemain berubah di layar; dipakai membuang data server yang sudah basi.
   const localVerRef = useRef(0);
   // Cegah refresh room menumpuk (realtime + polling + jawaban sekaligus)
-  const refreshStateRef = useRef({ running: false, again: false, force: false, promise: null });
+  const refreshStateRef = useRef({ running: false, again: false, force: false, promise: null, id: null });
+  const refreshRoomRef = useRef(null);
+
+  screenRef.current = screen;
+  racingRef.current = screen === 'room' && room?.status === 'racing';
 
   const allPlayersRaw = [...players, ...localBots];
   const rankedPlayers = [...allPlayersRaw].sort((a, b) => {
@@ -503,14 +569,22 @@ export default function App() {
     rankedPlayers.findIndex((p) => p.user_id === uid) + 1
   );
 
+  const trackLen = Number(room?.track_length) || 300;
+  const needCorrect = Number(room?.required_correct) || 0;
+  const myCorrect = Number(me?.correct_count) || 0;
+  const atGate = !!me?.needs_quiz && Number(me?.distance) >= trackLen;
+  const incomingCount = friends.filter((f) => f.state === 'incoming').length;
+  const inRoomIds = new Set(players.map((p) => p.user_id));
+  const selectedCount = quizzes.find((q) => q.id === selectedQuiz)?.qcount || 0;
+
   const congratsText =
     myPosition === 1
-      ? 'Juara 1! Kucingmu paling cepat dan paling pintar! 🥇'
+      ? 'Juara 1! Kucingmu paling cepat dan paling pintar!'
       : myPosition === 2
-      ? 'Juara 2! Sedikit lagi jadi yang pertama! 🥈'
+      ? 'Juara 2! Sedikit lagi jadi yang pertama!'
       : myPosition === 3
-      ? 'Juara 3! Kamu masuk podium! 🥉'
-      : 'Kamu berhasil sampai garis finish! Terus berlatih ya! 💪';
+      ? 'Juara 3! Kamu masuk podium!'
+      : 'Kamu berhasil sampai garis finish! Terus berlatih ya!';
 
   // Tinggi area balapan menyesuaikan jumlah lintasan supaya tidak ada kucing yang terpotong
   // Geometri lintasan dihitung di sini dan dipasang INLINE, jadi tidak bergantung pada urutan
@@ -537,12 +611,13 @@ export default function App() {
     busyRef.current = true;
     setBusy(true);
     try {
-      await fn();
+      return await fn();
     } catch (e) {
       const m = msg(e);
       if (m.includes('duplicate key'))
         setError('Data sudah ada, silakan gunakan nama lain.');
       else setError(m);
+      return undefined;
     } finally {
       busyRef.current = false;
       setBusy(false);
@@ -559,7 +634,7 @@ export default function App() {
     }
 
     const updateTargetRect = () => {
-      const currentFlow = TOUR_FLOWS[tutorialFlow];
+      const currentFlow = tourSteps(tutorialFlow, isGuest);
       if (!currentFlow || !currentFlow[tutorialStep]) return;
 
       const el = document.getElementById(currentFlow[tutorialStep].id);
@@ -588,7 +663,7 @@ export default function App() {
       .querySelectorAll('.tour-target')
       .forEach((n) => n.classList.remove('tour-target'));
     if (!showTutorial) return;
-    const id = TOUR_FLOWS[tutorialFlow]?.[tutorialStep]?.id;
+    const id = tourSteps(tutorialFlow, isGuest)?.[tutorialStep]?.id;
     const el = id ? document.getElementById(id) : null;
     if (el) el.classList.add('tour-target');
     return () => el?.classList.remove('tour-target');
@@ -610,7 +685,7 @@ export default function App() {
   };
 
   const nextTutorialStep = () => {
-    const currentFlow = TOUR_FLOWS[tutorialFlow];
+    const currentFlow = tourSteps(tutorialFlow, isGuest);
     if (tutorialStep < currentFlow.length - 1) {
       setTutorialStep((prev) => prev + 1);
       fx('click');
@@ -627,7 +702,7 @@ export default function App() {
   };
 
   const goToNextTutorialPage = () => {
-    const next = NEXT_TOUR_FLOW[tutorialFlow];
+    const next = nextTour(tutorialFlow, isGuest);
     if (next) {
       setScreen(next.screen);
       setTutorialFlow(next.screen);
@@ -669,7 +744,7 @@ export default function App() {
 
     // Muat riwayat dari Supabase, sekaligus hapus otomatis yang > 7 hari
   const refreshHistory = useCallback(async () => {
-    if (!uid || !supabase) { setHistory([]); return; }
+    if (!uid || !supabase || isGuest) { setHistory([]); return; }
     try {
       const sevenDaysAgo = new Date(
         Date.now() - 7 * 24 * 60 * 60 * 1000
@@ -693,7 +768,7 @@ export default function App() {
     } catch {
       setHistory([]);
     }
-  }, [uid]);
+  }, [uid, isGuest]);
   useEffect(() => { refreshHistory(); }, [refreshHistory, screen]);
 
   const closeWelcome = (withTutorial) => {
@@ -823,22 +898,26 @@ export default function App() {
     }
     if (realCount > prevRealPlayersRef.current && localBotsRef.current.length > 0) {
       setLocalBots([]);
-      notify('🤖 Bot dihapus otomatis karena ada pemain asli yang bergabung!', 'info');
+      notify('Bot dihapus otomatis karena ada pemain asli yang bergabung!', 'info');
       fx('click');
     }
     prevRealPlayersRef.current = realCount;
   }, [players.length, screen, room, notify]);
 
   const refreshQuizzes = useCallback(async () => {
-    if (!supabase || !uid) return;
+    if (!supabase || !uid || isGuest) return;
     const fetchList = async () => {
       const { data, error: e } = await supabase
         .from('quizzes')
-        .select('id,title')
+        .select('id,title,quiz_questions(count)')
         .eq('owner_id', uid)
         .order('created_at', { ascending: false });
       if (e) throw e;
-      return data || [];
+      return (data || []).map((q) => ({
+        id: q.id,
+        title: q.title,
+        qcount: q.quiz_questions?.[0]?.count ?? 0,
+      }));
     };
     let list = await fetchList();
 
@@ -861,7 +940,7 @@ export default function App() {
 
     setQuizzes(list);
     setSelectedQuiz((prev) => prev || list[0]?.id || '');
-  }, [uid]);
+  }, [uid, isGuest]);
 
   const createSampleQuiz = () =>
     run(async () => {
@@ -878,7 +957,7 @@ export default function App() {
     const [r, p] = await Promise.all([
       supabase
         .from('rooms')
-        .select('id,code,host_id,status,quiz_id,quiz_time_limit')
+        .select('id,code,host_id,status,quiz_id,quiz_time_limit,track_length,required_correct')
         .eq('id', id)
         .single(),
       supabase
@@ -889,6 +968,8 @@ export default function App() {
     ]);
     if (r.error) throw r.error;
     if (p.error) throw p.error;
+    // balasan untuk room yang sudah ditinggalkan / diganti: buang
+    if (activeRoomRef.current !== id) return;
     setRoom((prev) =>
       prev && JSON.stringify(prev) === JSON.stringify(r.data) ? prev : r.data
     );
@@ -917,12 +998,19 @@ export default function App() {
     (id, force = false) => {
       if (!supabase || !id) return Promise.resolve();
       const st = refreshStateRef.current;
-      if (st.running) {
+      if (st.running && st.id === id) {
         st.again = true;
         st.force = st.force || force;
         return st.promise;
       }
+      if (st.running) {
+        // room lain masih diproses: tunggu selesai lalu ambil data room yang baru
+        return st.promise
+          .catch(() => {})
+          .then(() => refreshRoomRef.current(id, force));
+      }
       st.running = true;
+      st.id = id;
       st.promise = (async () => {
         try {
           let f = force;
@@ -940,6 +1028,7 @@ export default function App() {
     },
     [doRefreshRoom]
   );
+  refreshRoomRef.current = refreshRoom;
 
   const advancePlayer = async () => {
     if (
@@ -954,20 +1043,30 @@ export default function App() {
     )
       return;
     const sprint = moveRef.current.sprinting;
-    const step = sprint ? 15 : 6;
-    const cost = sprint ? 35 : 20;
+    // Server menghitung gerak dari SELANG WAKTU antar langkah (bukan jumlah tekanan).
+    // Layar meniru rumus yang sama supaya energi di layar dan di server tidak berselisih.
+    const nowMs = Date.now();
+    let dt = lastMoveRef.current ? (nowMs - lastMoveRef.current) / 1000 : 0.3;
+    if (dt < 0.08) return; // terlalu cepat: server juga mengabaikannya
+    dt = Math.min(0.6, dt);
+    lastMoveRef.current = nowMs;
+    const rate = sprint ? 35 : 20;
+    const speed = sprint ? 24 : 15;
     setPlayers((prev) =>
       prev.map((p) => {
         if (p.user_id === uid) {
-          const nextDist = Math.min(300, Number(p.distance) + step);
-          const nextEnergy = Math.max(0, Number(p.energy) - cost);
+          const used = Math.min(dt, Number(p.energy) / rate);
+          const nextDist = Math.min(trackLen, Number(p.distance) + speed * used);
+          const nextEnergy = Math.max(0, Number(p.energy) - rate * used);
+          // sampai garis finish tapi belum cukup jawaban benar: tertahan, harus menjawab dulu
+          const gate = nextDist >= trackLen && Number(p.correct_count) < needCorrect;
           return {
             ...p,
             distance: nextDist,
             energy: nextEnergy,
-            needs_quiz: nextEnergy <= 0 && nextDist < 300,
+            needs_quiz: (nextEnergy <= 0 && nextDist < trackLen) || gate,
             finished_at:
-              nextDist >= 300
+              nextDist >= trackLen && !gate
                 ? p.finished_at || new Date().toISOString()
                 : p.finished_at,
           };
@@ -998,7 +1097,7 @@ export default function App() {
   };
 
     useEffect(() => {
-    if (room?.status === 'racing' && me?.finished_at) {
+    if ((room?.status === 'racing' || room?.status === 'finished') && me?.finished_at) {
       setShowResults(true);
       if (!finishedRef.current) {
         finishedRef.current = true;
@@ -1009,7 +1108,7 @@ export default function App() {
 
         // Simpan riwayat ke Supabase
         (async () => {
-          if (!uid || !room || !supabase) return;
+          if (!uid || !room || !supabase || isGuest) return;
           try {
             let quizTitle = quizzes.find((q) => q.id === room.quiz_id)?.title;
             if (!quizTitle) {
@@ -1051,29 +1150,42 @@ export default function App() {
         prev.map((b) => {
           if (b.finished_at) return b;
           if (b.needs_quiz) {
-            if (Math.random() > 0.4)
+            if (Math.random() > 0.4) {
+              const correct = b.correct_count + 1;
+              const botAtGate = Number(b.distance) >= trackLen;
+              if (botAtGate && correct >= needCorrect)
+                return {
+                  ...b,
+                  needs_quiz: false,
+                  energy: 100,
+                  correct_count: correct,
+                  finished_at: new Date().toISOString(),
+                };
               return {
                 ...b,
-                needs_quiz: false,
-                energy: 100,
-                correct_count: b.correct_count + 1,
+                needs_quiz: botAtGate,
+                energy: botAtGate ? b.energy : 100,
+                correct_count: correct,
               };
+            }
             return b;
           }
           const step = Math.random() * 10 + 4;
-          const nextDist = Math.min(300, Number(b.distance) + step);
+          const nextDist = Math.min(trackLen, Number(b.distance) + step);
           const nextEnergy = Math.max(
             0,
             Number(b.energy) - (Math.random() * 20 + 15)
           );
+          const botGate = nextDist >= trackLen && b.correct_count < needCorrect;
           return {
             ...b,
             distance: nextDist,
             energy: nextEnergy,
             needs_quiz:
-              nextEnergy <= 0 && nextDist < 300 && Math.random() > 0.5,
+              botGate ||
+              (nextEnergy <= 0 && nextDist < trackLen && Math.random() > 0.5),
             finished_at:
-              nextDist >= 300
+              nextDist >= trackLen && !botGate
                 ? b.finished_at || new Date().toISOString()
                 : b.finished_at,
           };
@@ -1081,45 +1193,50 @@ export default function App() {
       );
     }, 1200);
     return () => clearInterval(interval);
-  }, [room?.status, localBots.length, showResults, raceReady]);
+  }, [room?.status, localBots.length, showResults, raceReady, trackLen, needCorrect]);
 
+  // Sesi login. Layar HANYA berubah kalau penggunanya berganti: Supabase mengirim ulang
+  // SIGNED_IN setiap tab dibuka kembali, dan itu tidak boleh melempar pemain ke menu.
   useEffect(() => {
     if (!configured) return;
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session) {
-        setUid(session.user.id);
-        setUserEmail(session.user.email || '');
-        setIsGuest(session.user.is_anonymous || false);
-        if (session.user.user_metadata?.name)
-          setName(session.user.user_metadata.name);
-        refreshQuizzes();
-        setScreen('home');
-      } else {
-        setUid(null);
-        setScreen('auth');
-      }
-    });
-
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (session) {
-        setUid(session.user.id);
-        setUserEmail(session.user.email || '');
-        setIsGuest(session.user.is_anonymous || false);
-        if (session.user.user_metadata?.name)
-          setName(session.user.user_metadata.name);
-        refreshQuizzes();
-        setScreen('home');
-      } else {
+    const apply = (session) => {
+      if (!session) {
+        uidRef.current = null;
         setUid(null);
         setUserEmail('');
         setIsGuest(false);
-        setScreen('auth');
+        setProfile(null);
+        setFriends([]);
+        setInvites([]);
+        setScreen(wantAuthRef.current ? 'auth' : 'entrance');
+        wantAuthRef.current = false;
+        return;
       }
-    });
+      const u = session.user;
+      const changed = uidRef.current !== u.id;
+      uidRef.current = u.id;
+      setUid(u.id);
+      setUserEmail(u.email || '');
+      setIsGuest(!!u.is_anonymous);
+      if (!changed) return;
+      if (u.is_anonymous) {
+        let g = localStorage.getItem('catdash_guest_name');
+        if (!g) {
+          g = `Tamu ${Math.floor(100 + Math.random() * 900)}`;
+          localStorage.setItem('catdash_guest_name', g);
+        }
+        setName(g);
+      } else if (u.user_metadata?.name) {
+        setName(String(u.user_metadata.name).slice(0, 20));
+      }
+      if (screenRef.current === 'auth') setScreen('home');
+    };
+    supabase.auth.getSession().then(({ data: { session } }) => apply(session));
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => apply(session));
     return () => subscription.unsubscribe();
-  }, [refreshQuizzes]);
+  }, []);
 
     const handleAuth = async (e) => {
     e.preventDefault();
@@ -1164,14 +1281,35 @@ export default function App() {
   const handleGuest = () =>
     run(async () => {
       const { error } = await supabase.auth.signInAnonymously();
-      if (error) throw error;
+      if (error) {
+        if (/anonymous/i.test(error.message))
+          throw Error(
+            'Login tamu belum diaktifkan. Di Supabase: Authentication > Sign In / Providers > nyalakan "Allow anonymous sign-ins".'
+          );
+        throw error;
+      }
+      setIntroPlayed(true);
+      setScreen('home');
       fx('click');
     });
+
+  // dari layar pembuka / profil tamu: keluar lalu tampilkan form login
+  const goLogin = async () => {
+    setIntroPlayed(true);
+    if (uidRef.current) {
+      wantAuthRef.current = true;
+      await supabase.auth.signOut();
+    } else {
+      setScreen('auth');
+    }
+    fx('click');
+  };
 
   const handleLogout = () =>
     run(async () => {
       await supabase.auth.signOut();
       home();
+      setScreen('entrance');
       fx('click');
     });
 
@@ -1235,25 +1373,21 @@ export default function App() {
       setQuestion(prefetchRef.current.q);
       return;
     }
-    rpc('current_game_question', { p_room: room.id })
+    const roomId = room.id;
+    rpc('current_game_question', { p_room: roomId })
       .then((q) => {
+        if (activeRoomRef.current !== roomId) return;
         if (q && q.prompt && Array.isArray(q.options)) setQuestion(q);
-        else
-          setQuestion({
-            number: 1,
-            type: 'pg',
-            prompt: 'Soal tidak ditemukan. Berapakah 5 + 5?',
-            options: ['8', '9', '10', '11'],
-          });
+        else throw Error('soal belum tersedia');
       })
       .catch((e) => {
-        setError(msg(e));
-        setQuestion({
-          number: 1,
-          type: 'pg',
-          prompt: 'Gagal memuat. Berapakah 2 x 3?',
-          options: ['4', '5', '6', '7'],
-        });
+        // jangan pernah menampilkan soal palsu: coba lagi sebentar lagi
+        quizKey.current = '';
+        if (/belum tersedia/.test(msg(e))) {
+          // server bilang belum waktunya kuis: samakan layar dengan server
+          refreshRoom(roomId, true).catch(() => {});
+        } else setError(msg(e));
+        setTimeout(() => setQuizRetry((n) => n + 1), 1200);
       });
   }, [
     room?.id,
@@ -1262,6 +1396,7 @@ export default function App() {
     me?.correct_count,
     me?.wrong_count,
     showResults,
+    quizRetry,
   ]);
 
   // Stopwatch baru jalan setelah hitung mundur selesai
@@ -1313,9 +1448,22 @@ export default function App() {
     showResults,
   ]);
 
+  // Setiap soal baru muncul, tombol jawaban terkunci sebentar (QUIZ_LOCK_MS) supaya
+  // pemain yang masih menekan-nekan tombol LARI tidak langsung menjawab asal-asalan.
+  useEffect(() => {
+    if (!(room?.status === 'racing' && me?.needs_quiz && question && !showResults)) {
+      setQuizReady(true);
+      return;
+    }
+    setQuizReady(false);
+    const id = setTimeout(() => setQuizReady(true), QUIZ_LOCK_MS);
+    return () => clearTimeout(id);
+  }, [room?.status, me?.needs_quiz, question?.number, showResults]);
+
+  // Waktu menjawab baru berjalan setelah jeda selesai
   useEffect(() => {
     if (
-      !(room?.status === 'racing' && me?.needs_quiz && question && !showResults)
+      !(room?.status === 'racing' && me?.needs_quiz && question && !showResults && quizReady)
     ) {
       setQuizSeconds(room?.quiz_time_limit || 15);
       quizTimeoutRef.current = false;
@@ -1334,6 +1482,7 @@ export default function App() {
     question?.number,
     showResults,
     room?.quiz_time_limit,
+    quizReady,
   ]);
 
   useEffect(() => {
@@ -1397,6 +1546,15 @@ export default function App() {
 
   const enterRoom = async (id) => {
     // reset state balapan agar quiz yang sama bisa dimainkan ulang
+    activeRoomRef.current = id;
+    prevStatusRef.current = null;
+    prefetchRef.current = { key: '', q: null };
+    quizKey.current = '';
+    localVerRef.current += 1;
+    lastMoveRef.current = 0;
+    moveChainRef.current = Promise.resolve();
+    setInvitedIds(new Set());
+    setQuestion(null);
     finishedRef.current = false;
     countdownStartedRef.current = false;
     setShowResults(false);
@@ -1419,10 +1577,8 @@ export default function App() {
       if (!questions.length || questions.length > 50)
         throw Error('Jumlah soal 1-50.');
       questions.forEach((q, i) => {
-        if (!q.prompt.trim())
-          throw Error(`Soal nomor ${i + 1} belum ada pertanyaannya.`);
-        if (q.options.some((o) => !o.trim()))
-          throw Error(`Lengkapi semua pilihan jawaban soal nomor ${i + 1}.`);
+        const problem = validateQuestion(q, i);
+        if (problem) throw Error(problem);
       });
 
       // ===== MODE EDIT: perbarui kuis yang sudah ada =====
@@ -1438,16 +1594,9 @@ export default function App() {
           .eq('id', editingQuizId);
         if (ue) throw ue;
         // soal baru dimasukkan dulu, baru soal lama dihapus (aman kalau gagal di tengah jalan)
-        const { error: ie } = await supabase.from('quiz_questions').insert(
-          questions.map((q, i) => ({
-            quiz_id: editingQuizId,
-            position: i,
-            prompt: q.prompt.trim(),
-            type: 'pg',
-            options: q.options.map((o) => o.trim()),
-            correct_index: Number(q.correct_index),
-          }))
-        );
+        const { error: ie } = await supabase
+          .from('quiz_questions')
+          .insert(questions.map((q, i) => toRow(q, editingQuizId, i + 100)));
         if (ie) throw ie;
         if (oldRows && oldRows.length) {
           const { error: de } = await supabase
@@ -1458,6 +1607,15 @@ export default function App() {
               oldRows.map((r) => r.id)
             );
           if (de) throw de;
+        }
+        // rapikan nomor urut (soal baru tadi memakai posisi sementara 100+)
+        for (let i = 0; i < questions.length; i += 1) {
+          const { error: pe } = await supabase
+            .from('quiz_questions')
+            .update({ position: i })
+            .eq('quiz_id', editingQuizId)
+            .eq('position', i + 100);
+          if (pe) throw pe;
         }
         await refreshQuizzes();
         setSelectedQuiz(editingQuizId);
@@ -1475,16 +1633,9 @@ export default function App() {
         .select('id')
         .single();
       if (e) throw e;
-      const { error: qe } = await supabase.from('quiz_questions').insert(
-        questions.map((q, i) => ({
-          quiz_id: data.id,
-          position: i,
-          prompt: q.prompt.trim(),
-          type: 'pg',
-          options: q.options.map((o) => o.trim()),
-          correct_index: Number(q.correct_index),
-        }))
-      );
+      const { error: qe } = await supabase
+        .from('quiz_questions')
+        .insert(questions.map((q, i) => toRow(q, data.id, i)));
       if (qe) {
         await supabase.from('quizzes').delete().eq('id', data.id);
         throw qe;
@@ -1528,16 +1679,7 @@ export default function App() {
         .eq('quiz_id', id)
         .order('position');
       if (e2) throw e2;
-      const loaded = (qs || []).map((q) => {
-        const opts = Array.isArray(q.options) ? q.options.map(String) : [];
-        return {
-          _key: ++questionKeySeed,
-          prompt: q.prompt || '',
-          type: 'pg',
-          options: [...opts, '', '', '', ''].slice(0, 4),
-          correct_index: Math.min(3, Math.max(0, Number(q.correct_index) || 0)),
-        };
-      });
+      const loaded = (qs || []).map(fromRow);
       setEditingQuizId(id);
       setTitle(qz.title || '');
       setQuestions(loaded.length ? loaded : [blank()]);
@@ -1552,24 +1694,20 @@ export default function App() {
         throw Error('Lengkapi nama dan pilih kuis.');
       localStorage.setItem('catdash_name', name.trim());
       const code = await rpc('create_game_room', {
-        p_quiz: selectedQuiz, p_name: name.trim(), p_cat: cat, p_time_limit: timeLimit,
+        p_quiz: selectedQuiz,
+        p_name: name.trim(),
+        p_cat: cat,
+        p_time_limit: Math.max(5, Math.min(60, Number(timeLimit) || 15)),
+        p_track: trackSetting,
+        p_required: Math.max(0, Math.min(selectedCount || 0, Number(reqSetting) || 0)),
       });
       const { data, error: e } = await supabase
         .from('rooms').select('id').eq('code', code).single();
       if (e) throw e;
 
       // Bot ditambahkan sekarang (di lobby) agar terlihat & otomatis hilang saat pemain asli masuk
-      if (botCount > 0) {
-        const newBots = Array.from({ length: botCount }).map((_, i) => ({
-          id: `bot-${i}`, user_id: `bot-${i}`,
-          nickname: `Bot ${LABELS[CATS[i % 4]]}`,
-          cat: CATS[i % 4], distance: 0, energy: 100,
-          needs_quiz: false, correct_count: 0, wrong_count: 0, finished_at: null,
-        }));
-        setLocalBots(newBots);
-      } else {
-        setLocalBots([]);
-      }
+      botsWantedRef.current = botCount;
+      setLocalBots(botCount > 0 ? makeBots(botCount) : []);
 
       await enterRoom(data.id);
       fx('start');
@@ -1580,6 +1718,8 @@ export default function App() {
       if (!uid || !name.trim()) throw Error('Isi nama pemain.');
       if (!/^\d{6}$/.test(joinCode.trim())) throw Error('Kode room 6 digit.');
       localStorage.setItem('catdash_name', name.trim());
+      botsWantedRef.current = 0;
+      setLocalBots([]);
       const id = await rpc('join_game_room', {
         p_code: joinCode.trim(),
         p_name: name.trim(),
@@ -1608,53 +1748,49 @@ export default function App() {
       try {
         // pastikan semua langkah sudah diterima server sebelum menjawab
         await moveChainRef.current;
-        const ok = await rpc('answer_game_question', {
+        const res = await rpc('answer_game_question', {
           p_room: room.id,
           p_answer: p_answer,
         });
+        const ok = !!res?.ok;
+        lastMoveRef.current = Date.now();
+        const finishedNow = !!res?.finished;
+        const shown = res?.correct ? ` Jawaban: ${res.correct}` : '';
         localVerRef.current += 1;
-        
+
         if (ok) {
-          setFeedback('BENAR! Energi Penuh!');
-          fx('correct');
-          setQuestion(null);
-          quizKey.current = '';
-          setPlayers((prev) =>
-            prev.map((p) =>
-              p.user_id === uid
-                ? {
-                    ...p,
-                    needs_quiz: false,
-                    energy: 100,
-                    correct_count: p.correct_count + 1,
-                  }
-                : p
-            )
+          setFeedback(
+            finishedNow
+              ? 'BENAR! Kamu sampai garis finish!'
+              : atGate
+              ? `BENAR! Tinggal ${Math.max(0, needCorrect - myCorrect - 1)} soal lagi untuk finish.`
+              : 'BENAR! Energi Penuh!'
           );
+          fx('correct');
         } else {
           setIsShaking(true);
           setTimeout(() => setIsShaking(false), 500);
-          setFeedback(
-            isTimeout
-              ? 'WAKTU HABIS! Dapat soal baru.'
-              : 'SALAH! Coba soal baru.'
-          );
+          setFeedback(`${isTimeout ? 'WAKTU HABIS!' : 'SALAH!'}${shown} Dapat soal baru.`);
           fx('wrong');
-          setQuestion(null);
-          quizKey.current = '';
-          setPlayers((prev) =>
-            prev.map((p) =>
-              p.user_id === uid
-                ? {
-                    ...p,
-                    needs_quiz: true,
-                    energy: 0,
-                    wrong_count: p.wrong_count + 1,
-                  }
-                : p
-            )
-          );
         }
+        setQuestion(null);
+        quizKey.current = '';
+        setPlayers((prev) =>
+          prev.map((p) => {
+            if (p.user_id !== uid) return p;
+            const gate = Number(p.distance) >= trackLen;
+            return {
+              ...p,
+              correct_count: p.correct_count + (ok ? 1 : 0),
+              wrong_count: p.wrong_count + (ok ? 0 : 1),
+              energy: gate ? p.energy : ok ? 100 : 0,
+              needs_quiz: finishedNow ? false : gate ? true : !ok,
+              finished_at: finishedNow
+                ? p.finished_at || new Date().toISOString()
+                : p.finished_at,
+            };
+          })
+        );
         // tidak ditunggu: jawaban langsung terasa selesai, data room menyusul di latar belakang
         refreshRoom(room.id).catch(() => {});
       } catch (e) {
@@ -1665,7 +1801,7 @@ export default function App() {
         quizKey.current = '';
         prefetchRef.current = { key: '', q: null };
         refreshRoom(room.id, true).catch(() => {});
-        if (!String(msg(e)).includes('Tidak ada soal')) {
+        if (!/Tidak ada soal|Belum waktunya|tidak aktif/.test(String(msg(e)))) {
           setFeedback('Terjadi kesalahan sistem.');
           setError(msg(e));
         } else {
@@ -1736,6 +1872,10 @@ export default function App() {
         data: { name: name.trim() },
       });
       if (e) throw e;
+      if (!isGuest && dbReady) {
+        const p = await rpc('sync_profile', { p_name: name.trim(), p_avatar: null, p_color: null });
+        if (p) setProfile(p);
+      }
       localStorage.setItem('catdash_name', name.trim());
       setFeedback('Profil berhasil diupdate!');
       fx('correct');
@@ -1747,6 +1887,12 @@ export default function App() {
       sendingStep: false,
       pendingStep: false,
     };
+    activeRoomRef.current = null;
+    prevStatusRef.current = null;
+    prefetchRef.current = { key: '', q: null };
+    quizKey.current = '';
+    botsWantedRef.current = 0;
+    setInvitedIds(new Set());
     setRoom(null);
     setPlayers([]);
     setLocalBots([]);
@@ -1766,6 +1912,214 @@ export default function App() {
     leaveEditor();
   };
 
+  // ===== PROFIL, TEMAN, UNDANGAN, REMATCH =====
+  const loadProfile = useCallback(async () => {
+    try {
+      let p = await rpc('sync_profile', { p_name: null, p_avatar: null, p_color: null });
+      if (p && p.display_name === 'Pemain') {
+        // profil baru: pakai nama dari pendaftaran
+        const { data } = await supabase.auth.getUser();
+        const meta = String(data?.user?.user_metadata?.name || '').trim().slice(0, 20);
+        if (meta) p = await rpc('sync_profile', { p_name: meta, p_avatar: null, p_color: null });
+      }
+      if (p) {
+        setProfile(p);
+        setName(p.display_name);
+        setCat(p.avatar);
+        localStorage.setItem('catdash_name', p.display_name);
+      }
+      setDbReady(true);
+    } catch {
+      setDbReady(false);
+    }
+  }, []);
+
+  const refreshFriends = useCallback(async () => {
+    try {
+      const f = await rpc('list_friends');
+      const list = Array.isArray(f) ? f : [];
+      setFriends(list);
+      const incoming = list.filter((x) => x.state === 'incoming').map((x) => x.id);
+      if (seenRequestsRef.current) {
+        const fresh = incoming.filter((id) => !seenRequestsRef.current.has(id));
+        if (fresh.length) {
+          const who = list.find((x) => x.id === fresh[0])?.display_name || 'Seseorang';
+          notify(`${who} ingin berteman denganmu. Cek menu Teman.`, 'info');
+          sound('click', soundRef.current);
+        }
+      }
+      seenRequestsRef.current = new Set(incoming);
+    } catch {}
+  }, [notify]);
+
+  const refreshInvites = useCallback(async () => {
+    try {
+      const inv = await rpc('my_invites');
+      const list = Array.isArray(inv) ? inv : [];
+      list.forEach((i) => {
+        if (!seenInvitesRef.current.has(i.id)) {
+          seenInvitesRef.current.add(i.id);
+          notify(`${i.from_name} mengajakmu main!`, 'success');
+          sound('start', soundRef.current);
+        }
+      });
+      setInvites(list);
+    } catch {}
+  }, [notify]);
+
+  // setelah login: muat profil (akun biasa) dan daftar kuis
+  useEffect(() => {
+    if (!uid) return;
+    if (isGuest) {
+      setProfile(null);
+      return;
+    }
+    loadProfile();
+    refreshQuizzes().catch(() => {});
+  }, [uid, isGuest, loadProfile, refreshQuizzes]);
+
+  // denyut: tanda "online", daftar teman, dan undangan (berhenti selama balapan)
+  useEffect(() => {
+    if (!uid || isGuest || !dbReady) return;
+    let alive = true;
+    seenRequestsRef.current = null;
+    const tick = async () => {
+      if (!alive || document.hidden) return;
+      try {
+        await rpc('touch_presence');
+      } catch {}
+      if (racingRef.current) return;
+      await Promise.all([refreshFriends(), refreshInvites()]);
+    };
+    tick();
+    const id = setInterval(tick, 8000);
+    const ch = supabase
+      .channel(`invites-${uid}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'room_invites', filter: `to_user=eq.${uid}` },
+        () => {
+          if (!racingRef.current) refreshInvites();
+        }
+      )
+      .subscribe();
+    const onVis = () => {
+      if (!document.hidden) tick();
+    };
+    document.addEventListener('visibilitychange', onVis);
+    return () => {
+      alive = false;
+      clearInterval(id);
+      supabase.removeChannel(ch);
+      document.removeEventListener('visibilitychange', onVis);
+    };
+  }, [uid, isGuest, dbReady, refreshFriends, refreshInvites]);
+
+  // buka layar Teman / lobby: segarkan daftar teman saat itu juga
+  useEffect(() => {
+    if (!uid || isGuest || !dbReady) return;
+    if (screen === 'friends' || (screen === 'room' && room?.status === 'lobby')) refreshFriends();
+  }, [screen, room?.status, uid, isGuest, dbReady, refreshFriends]);
+
+  // tamu tidak boleh masuk layar khusus akun
+  useEffect(() => {
+    if (isGuest && ['create', 'host', 'friends', 'profile'].includes(screen)) setScreen('home');
+  }, [isGuest, screen]);
+
+  // host menekan "Main Lagi": semua pemain kembali ke lobby dengan nilai nol
+  useEffect(() => {
+    const prev = prevStatusRef.current;
+    prevStatusRef.current = room?.status ?? null;
+    if (room?.status === 'lobby' && (prev === 'racing' || prev === 'finished')) {
+      finishedRef.current = false;
+      setShowResults(false);
+      setShowCongrats(false);
+      setFinalMs(0);
+      setRaceStartTime(null);
+      setQuestion(null);
+      quizKey.current = '';
+      prefetchRef.current = { key: '', q: null };
+      moveChainRef.current = Promise.resolve();
+      localVerRef.current += 1;
+      setInvitedIds(new Set());
+      if (room?.id) refreshRoom(room.id, true).catch(() => {});
+      if (room?.host_id === uid && botsWantedRef.current > 0 && players.length <= 1)
+        setLocalBots(makeBots(botsWantedRef.current));
+    }
+  }, [room?.status]);
+
+  const addFriend = (code) =>
+    run(async () => {
+      const r = await rpc('send_friend_request', { p_code: code });
+      notify(
+        r?.state === 'accepted'
+          ? `Kamu dan ${r.name} sekarang berteman!`
+          : `Permintaan pertemanan dikirim ke ${r?.name || 'temanmu'}.`,
+        'success'
+      );
+      fx('correct');
+      await refreshFriends();
+      return true;
+    });
+  const respondFriend = (id, accept) =>
+    run(async () => {
+      await rpc('respond_friend_request', { p_id: id, p_accept: accept });
+      notify(accept ? 'Kalian sekarang berteman!' : 'Permintaan ditolak.', 'info');
+      await refreshFriends();
+    });
+  const removeFriend = (id) =>
+    run(async () => {
+      await rpc('remove_friendship', { p_id: id });
+      notify('Dihapus dari daftar teman.', 'info');
+      await refreshFriends();
+    });
+  const inviteFriend = (f) =>
+    run(async () => {
+      await rpc('invite_friend', { p_room: room.id, p_friend: f.user_id });
+      setInvitedIds((prev) => new Set(prev).add(f.user_id));
+      notify(`Undangan dikirim ke ${f.display_name}.`, 'success');
+      fx('click');
+    });
+  const joinInvite = (inv) =>
+    run(async () => {
+      const nm = (name || profile?.display_name || 'Pemain').trim().slice(0, 20);
+      botsWantedRef.current = 0;
+      setLocalBots([]);
+      const id = await rpc('join_game_room', { p_code: inv.code, p_name: nm, p_cat: cat });
+      setInvites((v) => v.filter((i) => i.id !== inv.id));
+      await enterRoom(id);
+      fx('click');
+    });
+  const dismissInvite = async (inv) => {
+    setInvites((v) => v.filter((i) => i.id !== inv.id));
+    try {
+      await rpc('dismiss_invite', { p_id: inv.id });
+    } catch {}
+  };
+  const copyFriendCode = () => {
+    navigator.clipboard?.writeText(profile?.friend_code || '');
+    notify('Kode teman disalin.', 'success');
+  };
+  const chooseAvatar = (patch) =>
+    run(async () => {
+      const p = await rpc('sync_profile', {
+        p_name: null,
+        p_avatar: patch.avatar ?? null,
+        p_color: patch.color ?? null,
+      });
+      if (p) {
+        setProfile(p);
+        setCat(p.avatar);
+      }
+      fx('click');
+    });
+  const rematch = () =>
+    run(async () => {
+      await rpc('rematch_room', { p_room: room.id });
+      await refreshRoom(room.id, true);
+      fx('start');
+    });
+
   if (!configured)
     return (
       <main className="wrap">
@@ -1776,6 +2130,48 @@ export default function App() {
       </main>
     );
 
+  const toastLayer = (
+    <div className="toast-container">
+      {error && (
+        <div className="toast toast-error">
+          <span>{error}</span>
+          <button onClick={() => setError('')}>×</button>
+        </div>
+      )}
+      {feedback && (
+        <div className="toast toast-info" onClick={() => setFeedback('')}>
+          <span>{feedback}</span>
+          <button onClick={() => setFeedback('')}>×</button>
+        </div>
+      )}
+      {toasts.map((t) => (
+        <div key={t.id} className={`toast toast-${t.type}`}>
+          <span>{t.message}</span>
+        </div>
+      ))}
+    </div>
+  );
+
+  if (screen === 'entrance')
+    return (
+      <>
+        <Entrance
+          skipIntro={introPlayed}
+          busy={busy}
+          user={uid ? { name: isGuest ? name : profile?.display_name || name, isGuest } : null}
+          onLogin={goLogin}
+          onGuest={handleGuest}
+          onContinue={() => {
+            setIntroPlayed(true);
+            setScreen('home');
+            fx('click');
+          }}
+          onSwitchAccount={goLogin}
+        />
+        {toastLayer}
+      </>
+    );
+
   // Isi panduan cara main (dipakai di modal & kartu lobby)
   const howToItems = (
     <ol className="instruction-list">
@@ -1784,21 +2180,35 @@ export default function App() {
         , atau tombol <b>LARI</b>) berulang-ulang untuk menggerakkan kucingmu.
       </li>
       <li>
-        Tahan <span className="kbd">SHIFT</span> (atau tombol <b>⚡ SPRINT</b>)
+        Tahan <span className="kbd">SHIFT</span> (atau tombol <b>SPRINT</b>)
         sambil menekan D untuk melangkah lebih jauh, tapi energi lebih boros.
       </li>
       <li>
-        <b>Bot</b> adalah lawan latihan. Kalau ada <b>pemain asli</b> yang masuk
-        room, bot akan otomatis <b>dihapus di semua device</b> supaya kamu bisa
-        bertanding dengan pemain sungguhan.
+        Saat energi habis, kamu harus menjawab soal. Soal bisa berupa{' '}
+        <b>pilihan ganda</b>, <b>benar/salah</b>, <b>isian singkat</b>,{' '}
+        <b>acak kata</b> (susun huruf), atau <b>sambung kata</b>. Semua tipe bisa muncul
+        dalam satu permainan.
+      </li>
+      <li>
+        Soal punya <b>jeda “Bersiap” sekitar 1 detik</b> supaya jari yang masih
+        menekan LARI tidak ikut menjawab. Waktu menjawab baru berjalan setelah jeda.
       </li>
       <li>
         Jawaban <b>benar</b> = energi penuh lagi. Jawaban <b>salah</b> atau
-        waktu habis = dapat soal baru.
+        waktu habis = dapat soal baru (kunci jawabannya ditampilkan).
       </li>
       <li>
-        Kucingmu ditandai <b>panah kuning ▼ KAMU</b> di atas kepalanya.
-        Siapa yang pertama sampai garis finish 🏁 (300 m) menang!
+        Panjang lintasan diatur host. Kadang ada syarat <b>wajib jawab benar</b>:
+        kalau kamu sampai garis finish tapi belum cukup jawaban benar, kamu
+        tertahan sampai syaratnya terpenuhi.
+      </li>
+      <li>
+        <b>Bot</b> adalah lawan latihan. Kalau ada <b>pemain asli</b> yang masuk
+        room, bot akan otomatis <b>dihapus di semua device</b>.
+      </li>
+      <li>
+        Kucingmu ditandai <b>panah ▼ KAMU</b> di atas kepalanya. Siapa yang
+        pertama sampai garis finish menang!
       </li>
     </ol>
   );
@@ -1876,11 +2286,11 @@ export default function App() {
             }}
           >
             <div className="tutorial-tooltip-arrow" />
-            <h3>{TOUR_FLOWS[tutorialFlow][tutorialStep].title}</h3>
-            <p>{TOUR_FLOWS[tutorialFlow][tutorialStep].desc}</p>
+            <h3>{tourSteps(tutorialFlow, isGuest)[tutorialStep].title}</h3>
+            <p>{tourSteps(tutorialFlow, isGuest)[tutorialStep].desc}</p>
             <div className="tutorial-footer">
               <div className="tutorial-dots">
-                {TOUR_FLOWS[tutorialFlow].map((_, i) => (
+                {tourSteps(tutorialFlow, isGuest).map((_, i) => (
                   <span
                     key={i}
                     className={`dot ${i === tutorialStep ? 'active' : ''}`}
@@ -1896,14 +2306,14 @@ export default function App() {
                     ← Sebelumnya
                   </button>
                 )}
-                {tutorialStep === TOUR_FLOWS[tutorialFlow].length - 1 &&
-                NEXT_TOUR_FLOW[tutorialFlow] ? (
+                {tutorialStep === tourSteps(tutorialFlow, isGuest).length - 1 &&
+                nextTour(tutorialFlow, isGuest) ? (
                   <button className="secondary" onClick={goToNextTutorialPage}>
-                    Lanjut ke {NEXT_TOUR_FLOW[tutorialFlow].label} →
+                    Lanjut ke {nextTour(tutorialFlow, isGuest).label} →
                   </button>
                 ) : (
                   <button className="secondary" onClick={nextTutorialStep}>
-                    {tutorialStep === TOUR_FLOWS[tutorialFlow].length - 1
+                    {tutorialStep === tourSteps(tutorialFlow, isGuest).length - 1
                       ? 'Selesai'
                       : 'Lanjut →'}
                   </button>
@@ -1915,8 +2325,8 @@ export default function App() {
       )}
 
       <header>
-        <div>
-          <span className="brand">🐾 CAT DASH</span>
+        <div className="brandBlock">
+          <span className="brand">CAT DASH</span>
           <small>MULTIPLAYER QUIZ RACE</small>
         </div>
         <div className="headerRight">
@@ -1927,81 +2337,77 @@ export default function App() {
                 className="ghost soundButton"
                 onClick={toggleSound}
               >
-                {soundOn ? '🔊' : '🔇'}
+                {soundOn ? 'SUARA: ON' : 'SUARA: OFF'}
               </button>
-              <button
-                className="ghost"
-                onClick={startTutorial}
-                style={{
-                  fontWeight: 'bold',
-                  color: 'var(--pink-shadow)',
-                  borderColor: 'var(--pink-soft)',
-                }}
-              >
-                ❓ PANDUAN
+              <button className="ghost" onClick={startTutorial}>
+                PANDUAN
               </button>
-              {screen !== 'home' &&
-                screen !== 'review' &&
-                screen !== 'profile' && (
+              {screen !== 'home' && screen !== 'review' && screen !== 'profile' && (
+                <button className="ghost" onClick={home}>
+                  MENU
+                </button>
+              )}
+              {isGuest ? (
+                <button className="secondary" onClick={goLogin}>
+                  MASUK AKUN
+                </button>
+              ) : (
+                <>
                   <button
-                    className="ghost"
-                    onClick={home}
-                    style={{ fontWeight: 'bold' }}
+                    className="ghost badgeBtn"
+                    onClick={() => {
+                      setScreen('friends');
+                      fx('click');
+                    }}
                   >
-                    MENU
+                    TEMAN
+                    {incomingCount > 0 && <i className="badge">{incomingCount}</i>}
                   </button>
-                )}
-              <button
-                className="ghost"
-                id="tour-btn-profil"
-                onClick={() => {
-                  setScreen('profile');
-                  fx('click');
-                }}
-              >
-                👤 PROFIL
-              </button>
+                  <button
+                    className="ghost profileBtn"
+                    id="tour-btn-profil"
+                    onClick={() => {
+                      setScreen('profile');
+                      fx('click');
+                    }}
+                  >
+                    {profile && (
+                      <Avatar cat={profile.avatar} color={profile.avatar_color} size={26} />
+                    )}
+                    PROFIL
+                  </button>
+                </>
+              )}
             </>
           ) : (
-            <span className="status">○ BELUM LOGIN</span>
+            <span className="status">BELUM LOGIN</span>
           )}
         </div>
       </header>
 
-      <div className="toast-container">
-        {error && (
-          <div className="toast toast-error">
-            <span>⚠ {error}</span>
-            <button onClick={() => setError('')}>×</button>
-          </div>
-        )}
-        {feedback && (
-          <div className="toast toast-info" onClick={() => setFeedback('')}>
-            <span>{feedback}</span>
-            <button onClick={() => setFeedback('')}>×</button>
-          </div>
-        )}
-        {toasts.map((t) => (
-          <div key={t.id} className={`toast toast-${t.type}`}>
-            <span>{t.message}</span>
-          </div>
-        ))}
-      </div>
+      {toastLayer}
+
+      {uid && !isGuest && !racingRef.current && !showTutorial && (
+        <InviteDock invites={invites} busy={busy} onJoin={joinInvite} onDismiss={dismissInvite} />
+      )}
 
       {/* AUTH */}
       {screen === 'auth' && (
         <section
-          className="panel center hero"
+          className="panel center hero authPanel"
           style={{ maxWidth: '500px', margin: '0 auto' }}
         >
-          <h1>CAT DASH</h1>
-          <p className="hero-desc">
-            Masuk untuk menyimpan progres dan bertanding dengan teman-temanmu.
+          <h1 className="logoCut small" aria-label="Cat Dash">
+            {'CAT DASH'.split('').map((c, i) => (
+              <span key={i} className={c === ' ' ? 'sp' : ''} style={{ '--i': i }}>
+                {c}
+              </span>
+            ))}
+          </h1>
+          <p className="authLead">
+            Masuk untuk menyimpan progres, berteman, dan bertanding dengan teman-temanmu.
           </p>
-          <div
-            className="questionEditor"
-            style={{ marginTop: '20px', textAlign: 'left' }}
-          >
+          <div className="questionEditor" style={{ marginTop: '20px', textAlign: 'left' }}>
             <h2 style={{ textAlign: 'center', marginBottom: '20px' }}>
               {authMode === 'login' ? 'Masuk Akun' : 'Daftar Akun Baru'}
             </h2>
@@ -2016,32 +2422,38 @@ export default function App() {
                   autoComplete="email"
                   required
                 />
-                <small style={{ display: 'block', marginTop: '6px' }}>
-                  Gunakan email aktif (Gmail, Yahoo, Outlook, iCloud, atau
-                  email sekolah/kampus).
+                <small className="fieldHint">
+                  Gunakan email aktif (Gmail, Yahoo, Outlook, iCloud, atau email
+                  sekolah/kampus).
                 </small>
               </label>
               <label>
                 Password
-                <input
-                  type={showPassword ? 'text' : 'password'}
-                  value={passwordInput}
-                  onChange={(e) => setPasswordInput(e.target.value)}
-                  placeholder="••••••••"
-                  required
-                />
-                <button
-                  type="button"
-                  className="linkBtn"
-                  style={{ marginTop: '6px', fontSize: '12px' }}
-                  onClick={() => setShowPassword((v) => !v)}
-                >
-                  {showPassword ? 'Sembunyikan password' : '👁 Lihat password'}
-                </button>
+                <div className="pwdRow">
+                  <input
+                    type={showPassword ? 'text' : 'password'}
+                    value={passwordInput}
+                    onChange={(e) => setPasswordInput(e.target.value)}
+                    placeholder="••••••••"
+                    autoComplete={authMode === 'login' ? 'current-password' : 'new-password'}
+                    required
+                  />
+                  <button
+                    type="button"
+                    className="ghost mini"
+                    onClick={() => setShowPassword((v) => !v)}
+                  >
+                    {showPassword ? 'SEMBUNYIKAN' : 'LIHAT'}
+                  </button>
+                </div>
                 {authMode === 'register' && (
-                  <small className="fieldHint">
-                    Minimal 8 karakter, mengandung huruf besar, huruf kecil, dan angka.
-                  </small>
+                  <ul className="pwdRules">
+                    {PASSWORD_RULES.map((r) => (
+                      <li key={r.label} className={r.test(passwordInput) ? 'ok' : ''}>
+                        {r.label}
+                      </li>
+                    ))}
+                  </ul>
                 )}
               </label>
               <button
@@ -2059,9 +2471,7 @@ export default function App() {
             <div style={{ textAlign: 'center', marginTop: '20px' }}>
               <button
                 className="linkBtn"
-                onClick={() =>
-                  setAuthMode(authMode === 'login' ? 'register' : 'login')
-                }
+                onClick={() => setAuthMode(authMode === 'login' ? 'register' : 'login')}
               >
                 {authMode === 'login'
                   ? 'Belum punya akun? Daftar di sini'
@@ -2069,42 +2479,80 @@ export default function App() {
               </button>
             </div>
           </div>
-          {ALLOW_GUEST && (
-            <div
-              className="actions"
-              style={{ justifyContent: 'center', marginTop: '20px' }}
-            >
-              <button
-                className="secondary"
-                onClick={handleGuest}
-                disabled={busy}
-              >
-                🎮 MAIN SEBAGAI TAMU
+          <div className="actions" style={{ justifyContent: 'center', marginTop: '20px' }}>
+            {ALLOW_GUEST && (
+              <button className="secondary" onClick={handleGuest} disabled={busy}>
+                MAIN SEBAGAI TAMU
               </button>
-            </div>
-          )}
+            )}
+            <button className="ghost" onClick={() => setScreen('entrance')} disabled={busy}>
+              KEMBALI
+            </button>
+          </div>
         </section>
       )}
 
       {/* PROFILE */}
-      {screen === 'profile' && (
-        <section
-          className="panel"
-          style={{ maxWidth: '500px', margin: '0 auto' }}
-        >
-          <h2>👤 Profil Pengguna</h2>
+      {screen === 'profile' && !isGuest && (
+        <section className="panel" style={{ maxWidth: '560px', margin: '0 auto' }}>
+          <h2>Profil Pengguna</h2>
           <p className="muted">Kelola identitasmu di game.</p>
 
           <div className="questionEditor" style={{ marginTop: '20px' }}>
             <div className="between" style={{ marginBottom: '15px' }}>
-              <b>Email / Status:</b>
-              <span>{isGuest ? 'Tamu (Guest)' : userEmail}</span>
+              <b>Email:</b>
+              <span>{userEmail}</span>
             </div>
+
+            <div className="avatarPicker" id="tour-avatar">
+              <Avatar
+                cat={profile?.avatar || cat}
+                color={profile?.avatar_color || 'sun'}
+                size={92}
+              />
+              <div className="avatarControls">
+                <label style={{ marginTop: 0 }}>Kucing avatar</label>
+                <div className="avatarCats">
+                  {CATS.map((c) => (
+                    <button
+                      key={c}
+                      type="button"
+                      className={`avaOpt ${(profile?.avatar || cat) === c ? 'on' : ''}`}
+                      disabled={busy || !dbReady}
+                      onClick={() => chooseAvatar({ avatar: c })}
+                    >
+                      <Cat cat={c} size={54} />
+                      <small>{LABELS[c]}</small>
+                    </button>
+                  ))}
+                </div>
+                <label>Warna bingkai</label>
+                <div className="avatarColors">
+                  {AVATAR_COLOR_NAMES.map((k) => (
+                    <button
+                      key={k}
+                      type="button"
+                      aria-label={`Warna ${k}`}
+                      className={`swatch ${(profile?.avatar_color || 'sun') === k ? 'on' : ''}`}
+                      style={{ background: AVATAR_COLORS[k] }}
+                      disabled={busy || !dbReady}
+                      onClick={() => chooseAvatar({ color: k })}
+                    />
+                  ))}
+                </div>
+              </div>
+            </div>
+            {!dbReady && (
+              <small className="fieldHint">
+                Avatar belum bisa disimpan: jalankan catdash_v3.sql di Supabase dulu.
+              </small>
+            )}
 
             <label>Nama Pemain</label>
             <input
               id="tour-input-nama"
               value={name}
+              maxLength={20}
               onChange={(e) => setName(e.target.value)}
               placeholder="Nama kamu"
             />
@@ -2116,7 +2564,7 @@ export default function App() {
               disabled={busy}
               style={{ width: '100%', marginTop: '15px' }}
             >
-              {busy ? 'MENYIMPAN...' : '💾 SIMPAN NAMA'}
+              {busy ? 'MENYIMPAN...' : 'SIMPAN NAMA'}
             </button>
 
             <label className="checkRow">
@@ -2130,8 +2578,8 @@ export default function App() {
           </div>
 
           <div className="history-card-wrap" id="tour-riwayat">
-            <h3 style={{ marginTop: '25px' }}>📜 Riwayat Bermain</h3>
-            <p className="muted" style={{ marginTop: '-6px', fontSize: '12px' }}>
+            <h3 style={{ marginTop: '25px' }}>Riwayat Bermain</h3>
+            <p className="muted" style={{ marginTop: '-6px', fontSize: '14px' }}>
               Otomatis dihapus jika sudah lebih dari 1 minggu.
             </p>
             {history.length === 0 ? (
@@ -2142,14 +2590,12 @@ export default function App() {
                   <div key={h.id} className="history-item">
                     <div className="between">
                       <b>{h.quiz_title}</b>
-                      <small>
-                        {new Date(h.played_at).toLocaleDateString('id-ID')}
-                      </small>
+                      <small>{new Date(h.played_at).toLocaleDateString('id-ID')}</small>
                     </div>
                     <div className="history-meta">
-                      <span>🏆 Posisi {h.position}/{h.total_players}</span>
-                      <span>⏱ {formatTime(h.time_ms)}</span>
-                      <span>✅ {h.correct_count} benar</span>
+                      <span>Posisi {h.position}/{h.total_players}</span>
+                      <span>Waktu {formatTime(h.time_ms)}</span>
+                      <span>{h.correct_count} benar</span>
                     </div>
                   </div>
                 ))}
@@ -2164,60 +2610,108 @@ export default function App() {
               onClick={handleLogout}
               style={{ width: '100%' }}
             >
-              🚪 KELUAR / LOG OUT
+              KELUAR / LOG OUT
             </button>
-            <button
-              className="ghost"
-              onClick={() => setScreen('home')}
-              style={{ width: '100%' }}
-            >
+            <button className="ghost" onClick={() => setScreen('home')} style={{ width: '100%' }}>
               KEMBALI KE MENU
             </button>
           </div>
         </section>
       )}
 
+      {/* TEMAN */}
+      {screen === 'friends' && !isGuest && (
+        <FriendsScreen
+          profile={profile}
+          friends={friends}
+          busy={busy}
+          dbReady={dbReady}
+          onAdd={addFriend}
+          onRespond={respondFriend}
+          onRemove={removeFriend}
+          onRefresh={refreshFriends}
+          onCopyCode={copyFriendCode}
+        />
+      )}
+
       {/* HOME */}
       {screen === 'home' && (
         <section className="panel center hero">
-          <h1>CAT DASH</h1>
-          <span className="heroTagline">✦ Multiplayer Quiz Race ✦</span>
+          <h1 className="logoCut" aria-label="Cat Dash">
+            {'CAT DASH'.split('').map((c, i) => (
+              <span key={i} className={c === ' ' ? 'sp' : ''} style={{ '--i': i }}>
+                {c}
+              </span>
+            ))}
+          </h1>
+          <span className="heroStamp">Multiplayer Quiz Race</span>
           <p className="hero-desc">
             Sebuah pengalaman seru di mana <b>kecepatan tangan</b> bertemu
             dengan <b>ketajaman otak</b>. Buktikan seberapa gesit kamu di
             lintasan balap penuh tantangan ini!
           </p>
           <div className="heroChips">
-            <span>⚡ Adu Cepat</span>
-            <span>🧠 Adu Pintar</span>
-            <span>🏁 Balap Seru</span>
-            <span>👥 Hingga 10 Pemain</span>
+            <span>Adu Cepat</span>
+            <span>Adu Pintar</span>
+            <span>5 Tipe Soal</span>
+            <span>Hingga 10 Pemain</span>
           </div>
+          {isGuest && (
+            <div className="guestBanner">
+              <b>Kamu masuk sebagai tamu.</b> Tamu hanya bisa ikut bermain di room
+              temanmu.{' '}
+              <button className="linkBtn" onClick={goLogin}>
+                Masuk atau daftar
+              </button>{' '}
+              untuk membuat kuis, berteman, dan menyimpan riwayat.
+            </div>
+          )}
           <div className="heroCats">
             {CATS.map((c) => (
               <Cat key={c} cat={c} size={90} />
             ))}
           </div>
           <div className="actions">
-            <button
-              id="tour-btn-kuis"
-              onClick={() => {
-                openCreate();
-                fx('click');
-              }}
-            >
-              ✎ BUAT KUIS
-            </button>
-            <button
-              id="tour-btn-bersama"
-              onClick={() => {
-                refreshQuizzes().catch((e) => setError(msg(e)));
-                setScreen('host');
-                fx('click');
-              }}
-            >
-              📚 MAIN BERSAMA
-            </button>
+            {isGuest ? (
+              <>
+                <button
+                  className="locked"
+                  aria-disabled="true"
+                  onClick={() => notify('Daftar akun dulu untuk membuat kuis.', 'info')}
+                >
+                  BUAT KUIS <small>terkunci</small>
+                </button>
+                <button
+                  className="locked"
+                  aria-disabled="true"
+                  onClick={() => notify('Daftar akun dulu untuk membuat room.', 'info')}
+                >
+                  MAIN BERSAMA <small>terkunci</small>
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  id="tour-btn-kuis"
+                  onClick={() => {
+                    openCreate();
+                    fx('click');
+                  }}
+                >
+                  BUAT KUIS
+                </button>
+                <button
+                  id="tour-btn-bersama"
+                  onClick={() => {
+                    refreshQuizzes().catch((e) => setError(msg(e)));
+                    setScreen('host');
+                    fx('click');
+                  }}
+                >
+                  MAIN BERSAMA
+                </button>
+              </>
+            )}
             <button
               id="tour-btn-gabung"
               onClick={() => {
@@ -2225,8 +2719,21 @@ export default function App() {
                 fx('click');
               }}
             >
-              ⌨ GABUNG ROOM
+              GABUNG ROOM
             </button>
+            {!isGuest && (
+              <button
+                id="tour-btn-teman"
+                className="secondary badgeBtn"
+                onClick={() => {
+                  setScreen('friends');
+                  fx('click');
+                }}
+              >
+                TEMAN
+                {incomingCount > 0 && <i className="badge">{incomingCount}</i>}
+              </button>
+            )}
           </div>
         </section>
       )}
@@ -2234,7 +2741,7 @@ export default function App() {
       {/* CREATE */}
       {screen === 'create' && (
         <section className="panel">
-          <h2>{editingQuizId ? '✏️ Edit Kuis' : '✎ Buat Kuis Sendiri'}</h2>
+          <h2>{editingQuizId ? 'Edit Kuis' : 'Buat Kuis Sendiri'}</h2>
           {editingQuizId && (
             <p className="muted" style={{ marginTop: '-6px' }}>
               Kamu sedang mengedit kuis. Perubahan baru tersimpan setelah klik
@@ -2251,56 +2758,16 @@ export default function App() {
           />
 
           {questions.map((q, i) => (
-            <div className="questionEditor" key={q._key}>
-              <div className="between">
-                <b>SOAL {i + 1}</b>
-                <button
-                  type="button"
-                  id={i === 0 ? 'tour-btn-hapus-soal' : undefined}
-                  className="ghost danger"
-                  onClick={() => deleteQuestion(i)}
-                >
-                  🗑 HAPUS
-                </button>
-              </div>
-              <textarea
-                id={i === 0 ? 'tour-input-soal' : undefined}
-                rows={2}
-                value={q.prompt}
-                onChange={(e) => setQ(i, 'prompt', e.target.value)}
-                placeholder="Tulis pertanyaan..."
-              />
-              <div className="options">
-                {q.options.map((v, j) => {
-                  const isCorrect = Number(q.correct_index) === j;
-                  return (
-                    <label
-                      className={`optionEdit ${isCorrect ? 'correct' : ''}`}
-                      key={j}
-                    >
-                      <input
-                        type="radio"
-                        name={`correct-${q._key}`}
-                        checked={isCorrect}
-                        onChange={() => setQ(i, 'correct_index', j)}
-                        title="Tandai sebagai jawaban benar"
-                      />
-                      <span className="optLetter">{'ABCD'[j]}</span>
-                      <input
-                        value={v}
-                        onChange={(e) => setQ(i, 'options', e.target.value, j)}
-                        placeholder={`Pilihan ${'ABCD'[j]}`}
-                      />
-                      {isCorrect && <span className="okTag">✓ BENAR</span>}
-                    </label>
-                  );
-                })}
-              </div>
-              <small style={{ display: 'block', marginTop: '10px' }}>
-                Klik bulat di sebelah kiri huruf untuk menandai jawaban yang
-                benar.
-              </small>
-            </div>
+            <QuestionEditor
+              key={q._key}
+              q={q}
+              index={i}
+              first={i === 0}
+              onPatch={(patch) =>
+                setQuestions((old) => old.map((x, j) => (j === i ? { ...x, ...patch } : x)))
+              }
+              onDelete={() => deleteQuestion(i)}
+            />
           ))}
 
           <div className="actions">
@@ -2308,7 +2775,7 @@ export default function App() {
               id="tour-btn-tambah-soal"
               className="secondary"
               disabled={questions.length >= 50}
-              onClick={() => setQuestions((v) => [...v, blank()])}
+              onClick={() => setQuestions((v) => [...v, blank(v[v.length - 1]?.type)])}
             >
               + TAMBAH SOAL
             </button>
@@ -2320,8 +2787,8 @@ export default function App() {
               {busy
                 ? 'MENYIMPAN...'
                 : editingQuizId
-                ? '💾 SIMPAN PERUBAHAN'
-                : '💾 SIMPAN KUIS'}
+                ? 'SIMPAN PERUBAHAN'
+                : 'SIMPAN KUIS'}
             </button>
             {editingQuizId && (
               <button
@@ -2343,7 +2810,7 @@ export default function App() {
       {/* HOST / JOIN */}
       {(screen === 'host' || screen === 'join') && (
         <section className="panel">
-          <h2>{screen === 'host' ? '📚 Kuis Saya' : '⌨ Gabung Room'}</h2>
+          <h2>{screen === 'host' ? 'Kuis Saya' : 'Gabung Room'}</h2>
 
           <div
             className="questionEditor"
@@ -2389,7 +2856,7 @@ export default function App() {
                   <option value="">-- Pilih kuis --</option>
                   {quizzes.map((q) => (
                     <option key={q.id} value={q.id}>
-                      {q.title}
+                      {q.title} ({q.qcount} soal)
                     </option>
                   ))}
                 </select>
@@ -2399,7 +2866,7 @@ export default function App() {
                   disabled={busy || !selectedQuiz}
                   onClick={() => startEditQuiz(selectedQuiz)}
                 >
-                  ✏️ EDIT KUIS
+                  EDIT KUIS
                 </button>
               </div>
               {quizzes.length === 0 && (
@@ -2419,9 +2886,14 @@ export default function App() {
                     disabled={busy}
                     onClick={createSampleQuiz}
                   >
-                    🎮 BUAT KUIS SIMULASI (15 SOAL)
+                    BUAT KUIS SIMULASI (15 SOAL, SEMUA TIPE)
                   </button>
                 </div>
+              )}
+              {quizzes.length > 0 && !quizzes.some((q) => q.title === SAMPLE_QUIZ_TITLE) && (
+                <button className="linkBtn" disabled={busy} onClick={createSampleQuiz}>
+                  + Tambah kuis simulasi yang memuat kelima tipe soal
+                </button>
               )}
 
               <label>Jumlah Bot (Lawan Sendiri)</label>
@@ -2438,7 +2910,7 @@ export default function App() {
                 }
               />
               <small className="fieldHint">
-                🤖 Maksimal 5 bot. Bot hanya lawan latihan dan tidak dihitung
+                Maksimal 5 bot. Bot hanya lawan latihan dan tidak dihitung
                 dalam batas pemain.
               </small>
 
@@ -2452,8 +2924,58 @@ export default function App() {
                 onChange={(e) => setTimeLimit(Number(e.target.value))}
               />
               <small className="fieldHint">
-                ⏱ Isi antara 5 sampai 60 detik. Satu room maksimal 10 pemain
+                Isi antara 5 sampai 60 detik. Satu room maksimal 10 pemain
                 (termasuk kamu).
+              </small>
+
+              <label>Panjang lintasan</label>
+              <div className="chipRow" id="tour-input-jarak">
+                {TRACKS.map((t) => (
+                  <button
+                    key={t.m}
+                    type="button"
+                    className={`chip ${trackSetting === t.m ? 'on' : ''}`}
+                    onClick={() => setTrackSetting(t.m)}
+                  >
+                    {t.label}
+                    <small>{t.m} m</small>
+                  </button>
+                ))}
+              </div>
+              <small className="fieldHint">
+                Perkiraan: pemain menjawab sekitar {Math.ceil(trackSetting / 75)} soal untuk
+                sampai garis finish.
+              </small>
+
+              <label>Wajib jawab benar sebelum finish</label>
+              <div className="reqRow" id="tour-input-wajib">
+                <input
+                  type="number"
+                  min="0"
+                  max={selectedCount || 50}
+                  value={reqSetting}
+                  onChange={(e) =>
+                    setReqSetting(
+                      Math.max(0, Math.min(selectedCount || 50, Math.floor(Number(e.target.value) || 0)))
+                    )
+                  }
+                />
+                <button type="button" className="ghost mini" onClick={() => setReqSetting(0)}>
+                  TANPA SYARAT
+                </button>
+                <button
+                  type="button"
+                  className="ghost mini"
+                  disabled={!selectedCount}
+                  onClick={() => setReqSetting(selectedCount)}
+                >
+                  SEMUA SOAL ({selectedCount})
+                </button>
+              </div>
+              <small className="fieldHint">
+                {reqSetting > 0
+                  ? `Pemain yang sampai garis finish tapi baru menjawab benar kurang dari ${reqSetting} soal akan tertahan dan harus menjawab dulu. Kuis ini punya ${selectedCount} soal.`
+                  : 'Tanpa syarat, pemenang ditentukan hanya dari siapa yang pertama sampai garis finish.'}
               </small>
 
               <button
@@ -2461,7 +2983,7 @@ export default function App() {
                 disabled={busy || !uid}
                 onClick={makeRoom}
               >
-                {busy ? 'MEMBUAT...' : '🎮 BUAT KODE ROOM'}
+                {busy ? 'MEMBUAT...' : 'BUAT KODE ROOM'}
               </button>
             </>
           ) : (
@@ -2476,7 +2998,7 @@ export default function App() {
                 placeholder="123456"
               />
               <small className="fieldHint">
-                👥 Satu room maksimal 10 pemain. Kalau penuh, kamu belum bisa
+                Satu room maksimal 10 pemain. Kalau penuh, kamu belum bisa
                 masuk.
               </small>
               <button
@@ -2521,6 +3043,17 @@ export default function App() {
               <p>
                 Pemain siap: <b>{players.length}/10</b>
               </p>
+              <div className="ruleChips">
+                <span>Lintasan <b>{trackLen} m</b></span>
+                <span>Waktu soal <b>{room.quiz_time_limit || 15} dtk</b></span>
+                <span>
+                  {needCorrect > 0 ? (
+                    <>Wajib benar <b>{needCorrect} soal</b></>
+                  ) : (
+                    <>Tanpa syarat jawaban</>
+                  )}
+                </span>
+              </div>
               <div className="playerGrid">
                 {allPlayersRaw.map((p) => {
                   const isBot = String(p.id).startsWith('bot-');
@@ -2538,9 +3071,19 @@ export default function App() {
                 })}
               </div>
 
+              {!isGuest && dbReady && (
+                <InvitePanel
+                  friends={friends}
+                  inRoomIds={inRoomIds}
+                  invitedIds={invitedIds}
+                  onInvite={inviteFriend}
+                  disabled={busy}
+                />
+              )}
+
               <div className="howto-card">
                 <div className="between">
-                  <h3 style={{ margin: 0 }}>📖 Cara Bermain</h3>
+                  <h3 style={{ margin: 0 }}>Cara Bermain</h3>
                   <button
                     className="ghost"
                     onClick={() => {
@@ -2564,7 +3107,7 @@ export default function App() {
                   disabled={busy || players.length < 1}
                   onClick={startGame}
                 >
-                  ▶ MULAI BALAPAN
+                  MULAI BALAPAN
                 </button>
               ) : (
                 <p className="muted">Menunggu host memulai...</p>
@@ -2572,7 +3115,7 @@ export default function App() {
             </>
           ) : showResults && showCongrats ? (
             <div className="congrats-modal">
-              <div className="congrats-confetti">🎉 🎊 ✨ 🎊 🎉</div>
+              <div className="congrats-confetti" aria-hidden="true"><i /><i /><i /><i /><i /><i /><i /></div>
               <h2 className="congrats-title">SELAMAT!</h2>
               <div className="congrats-cat">
                 <Cat cat={me?.cat || cat} action="idle" size={110} />
@@ -2580,17 +3123,17 @@ export default function App() {
               <p className="congrats-desc">{congratsText}</p>
               <div className="congrats-stats">
                 <div className="between">
-                  <span>🏁 Peringkat</span>
+                  <span>Peringkat</span>
                   <b>
                     {myPosition} dari {rankedPlayers.length}
                   </b>
                 </div>
                 <div className="between">
-                  <span>⏱ Waktu</span>
+                  <span>Waktu</span>
                   <b>{formatTime(finalMs)}</b>
                 </div>
                 <div className="between">
-                  <span>✅ Jawaban benar</span>
+                  <span>Jawaban benar</span>
                   <b>{me?.correct_count || 0}</b>
                 </div>
               </div>
@@ -2601,12 +3144,12 @@ export default function App() {
                   fx('click');
                 }}
               >
-                🏆 LIHAT PODIUM
+                LIHAT PODIUM
               </button>
             </div>
           ) : showResults ? (
             <div className="results-container">
-              <h2 className="podium-title">🏆 HASIL BALAPAN 🏆</h2>
+              <h2 className="podium-title">Hasil Balapan</h2>
               <div className="podium-wrapper">
                 {rankedPlayers[1] && (
                   <div className="podium-step step-2">
@@ -2614,7 +3157,7 @@ export default function App() {
                       <Cat cat={rankedPlayers[1].cat} size={64} />
                     </div>
                     <div className="podium-info">
-                      <span className="medal">🥈</span>
+                      <span className="medal m2">2</span>
                       <b>{rankedPlayers[1].nickname}</b>
                       <small>{Math.floor(rankedPlayers[1].distance)}m</small>
                     </div>
@@ -2626,7 +3169,7 @@ export default function App() {
                       <Cat cat={rankedPlayers[0].cat} size={80} />
                     </div>
                     <div className="podium-info">
-                      <span className="medal">🥇</span>
+                      <span className="medal m1">1</span>
                       <b>{rankedPlayers[0].nickname}</b>
                       <small>{Math.floor(rankedPlayers[0].distance)}m</small>
                     </div>
@@ -2638,7 +3181,7 @@ export default function App() {
                       <Cat cat={rankedPlayers[2].cat} size={56} />
                     </div>
                     <div className="podium-info">
-                      <span className="medal">🥉</span>
+                      <span className="medal m3">3</span>
                       <b>{rankedPlayers[2].nickname}</b>
                       <small>{Math.floor(rankedPlayers[2].distance)}m</small>
                     </div>
@@ -2668,8 +3211,15 @@ export default function App() {
                   onClick={openReview}
                   disabled={busy}
                 >
-                  {busy ? 'MEMUAT...' : '📖 LIHAT PEMBAHASAN'}
+                  {busy ? 'MEMUAT...' : 'LIHAT PEMBAHASAN'}
                 </button>
+                {isHost ? (
+                  <button className="secondary" onClick={rematch} disabled={busy}>
+                    MAIN LAGI (ROOM INI)
+                  </button>
+                ) : (
+                  <small className="rematchNote">Host bisa mengajak main lagi di room yang sama.</small>
+                )}
                 <button
                   onClick={() => {
                     home();
@@ -2699,23 +3249,25 @@ export default function App() {
 
                 <div className="raceTopHud">
                   <div className="hudPill">
-                    <span className="hudIcon">🏆</span>
-                    <b>{me?.correct_count || 0}</b>
+                    <b>
+                      {me?.correct_count || 0}
+                      {needCorrect > 0 && <i className="hudNeed">/{needCorrect}</i>}
+                    </b>
                     <small>BENAR</small>
                   </div>
                   <div className="hudPill">
-                    <span className="hudIcon">🏁</span>
-                    <b>300 m</b>
+                    <small>FINISH</small>
+                    <b>{trackLen} m</b>
                   </div>
                   <div className="hudPill timerPill">
-                    <span className="hudIcon">◷</span>
+                    <small>WAKTU</small>
                     <RaceTimer
                       startTime={raceStartTime}
                       running={!showResults}
                     />
                   </div>
                   <div className="energyPill">
-                    <span>⚡</span>
+                    <small>ENERGI</small>
                     <div className={`energyBar ${energyClass}`}>
                       <i style={{ width: `${myEnergy}%` }} />
                     </div>
@@ -2736,9 +3288,9 @@ export default function App() {
                   }}
                 >
                   <div className="mountainRange" />
-                  <div className="sakuraTree treeOne">🌸</div>
-                  <div className="sakuraTree treeTwo">🌸</div>
-                  <div className="pagoda">🏯</div>
+                  <div className="sakuraTree treeOne" />
+                  <div className="sakuraTree treeTwo" />
+                  <div className="pagoda" />
                   <div className="fenceLine" />
                   <div
                     className="raceLanes"
@@ -2748,7 +3300,7 @@ export default function App() {
                       const mine = p.user_id === uid;
                       const progress = Math.min(
                         88,
-                        Math.max(isMobile ? 9 : 3, (Number(p.distance) / 300) * 88)
+                        Math.max(isMobile ? 9 : 3, (Number(p.distance) / trackLen) * 88)
                       );
                       const moving = Number(p.distance) > 0;
                       const action = p.finished_at
@@ -2808,7 +3360,6 @@ export default function App() {
                     className="finishBanner"
                     style={{ top: geo.top, bottom: 8 }}
                   >
-                    🏁
                   </div>
                 </div>
 
@@ -2848,7 +3399,7 @@ export default function App() {
                       }}
                       onContextMenu={(e) => e.preventDefault()}
                     >
-                      <b>⚡</b>
+                      <b>»</b>
                       <small>
                         SHIFT
                         <br />
@@ -2859,18 +3410,19 @@ export default function App() {
                   <div className="distanceCard">
                     <small>JARAK SAAT INI</small>
                     <b>{Math.floor(Number(me?.distance || 0))} m</b>
+                    <small>dari {trackLen} m</small>
                   </div>
                   <div className="miniProgress">
                     <div
                       style={{
                         width: `${Math.min(
                           100,
-                          Number(me?.distance || 0) / 3
+                          (Number(me?.distance || 0) / trackLen) * 100
                         )}%`,
                       }}
                     />
-                    <span>🐱</span>
-                    <b>🏁</b>
+                    <span className="mpCat" />
+                    <b className="mpFlag" />
                   </div>
                   <div className="woodTip">
                     Tekan D atau tahan
@@ -2899,7 +3451,7 @@ export default function App() {
         <section className="panel">
           <div className="between roomHeading">
             <div>
-              <h2>📖 PEMBAHASAN KUIS</h2>
+              <h2>Pembahasan Kuis</h2>
               <p className="muted">
                 Kunci jawaban dan statistik akurasi pemain.
               </p>
@@ -2910,7 +3462,7 @@ export default function App() {
           </div>
           <div className="review-layout">
             <div className="review-players">
-              <h3>📊 Akurasi Pemain</h3>
+              <h3>Akurasi Pemain</h3>
               <div className="player-stats-list">
                 {rankedPlayers.map((p) => {
                   const totalQ = p.correct_count + p.wrong_count;
@@ -2931,9 +3483,9 @@ export default function App() {
                         </span>
                       </div>
                       <div className="player-stat-details">
-                        <span>✅ {p.correct_count} Benar</span>
-                        <span>❌ {p.wrong_count} Salah</span>
-                        <span>📝 {totalQ} Soal Dijawab</span>
+                        <span>{p.correct_count} Benar</span>
+                        <span>{p.wrong_count} Salah</span>
+                        <span>{totalQ} Soal Dijawab</span>
                       </div>
                     </div>
                   );
@@ -2941,16 +3493,16 @@ export default function App() {
               </div>
             </div>
             <div className="review-answers">
-              <h3>🔑 Kunci Jawaban</h3>
+              <h3>Kunci Jawaban</h3>
               <div className="answers-list">
                 {reviewData.map((q, i) => {
-                  const correctAns = `Opsi ${'ABCD'[q.correct_index]}. ${
-                    q.options[q.correct_index]
-                  }`;
+                  const correctAns = answerText(q);
                   return (
                     <div className="answer-card" key={q.id}>
                       <p className="q-prompt">
-                        <b>Soal {i + 1}:</b> {q.prompt}
+                        <b>Soal {i + 1}</b>{' '}
+                        <span className="qTag">{QTYPE_BY_ID[q.type]?.label || 'Pilihan Ganda'}</span>{' '}
+                        {q.type === 'chain' ? `Sambung kata dari ${q.prompt}` : q.prompt}
                       </p>
                       <p className="q-correct">
                         <b>Jawaban Benar:</b> <span>{correctAns}</span>
@@ -2973,7 +3525,7 @@ export default function App() {
                 <Cat key={c} cat={c} size={60} />
               ))}
             </div>
-            <h2>Selamat datang{name ? `, ${name}` : ''}! 🐾</h2>
+            <h2>Selamat datang{name ? `, ${name}` : ''}!</h2>
             <p className="welcome-desc">
               {localStorage.getItem(`catdash_tutorial_seen_${uid}`)
                 ? 'Senang melihatmu lagi! Mau lihat panduan cara bermain Cat Dash lagi?'
@@ -2981,7 +3533,7 @@ export default function App() {
             </p>
             <div className="actions" style={{ justifyContent: 'center' }}>
               <button onClick={() => closeWelcome(true)}>
-                📖 YA, MULAI TUTORIAL
+                YA, MULAI TUTORIAL
               </button>
               <button className="ghost" onClick={() => closeWelcome(false)}>
                 NANTI SAJA
@@ -3008,10 +3560,10 @@ export default function App() {
       {screen === 'room' && room?.status === 'lobby' && showHowTo && (
         <div className="overlay">
           <div className="instruction-modal">
-            <h2>🐾 Cara Bermain Cat Dash</h2>
+            <h2>Cara Bermain Cat Dash</h2>
             {howToItems}
             <button style={{ width: '100%' }} onClick={closeHowTo}>
-              MENGERTI, AYO MAIN! 🎮
+              MENGERTI, AYO MAIN!
             </button>
           </div>
         </div>
@@ -3022,28 +3574,20 @@ export default function App() {
         me?.needs_quiz &&
         !showResults && (
           <div className="overlay">
-            <div className="quizModal">
-              <h2>⚡ ENERGI HABIS!</h2>
-              <p>
-                Jawab soal dengan benar untuk memulihkan energi dan lanjut
-                berlari.
+            <div className={`quizModal ${atGate ? 'gate' : ''}`}>
+              <h2>{atGate ? 'GARIS FINISH TERKUNCI' : 'ENERGI HABIS!'}</h2>
+              <p className="quizLead">
+                {atGate
+                  ? `Jawab ${Math.max(0, needCorrect - myCorrect)} soal lagi dengan benar untuk melewati garis finish.`
+                  : 'Jawab soal dengan benar untuk memulihkan energi dan lanjut berlari.'}
               </p>
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '10px',
-                  margin: '15px 0',
-                }}
-              >
-                <span style={{ fontSize: '20px' }}>⏱</span>
+              <div className="quizTimerRow">
+                <span className="quizTimerLabel">WAKTU</span>
                 <div className="quizTimerBarWrapper">
                   <div
                     className="quizTimerBar"
                     style={{
-                      width: `${
-                        (quizSeconds / (room.quiz_time_limit || 15)) * 100
-                      }%`,
+                      width: `${(quizSeconds / (room.quiz_time_limit || 15)) * 100}%`,
                       backgroundColor:
                         quizSeconds > (room.quiz_time_limit || 15) * 0.3
                           ? 'var(--green-moss)'
@@ -3051,34 +3595,16 @@ export default function App() {
                     }}
                   />
                 </div>
-                <span
-                  style={{
-                    fontWeight: 900,
-                    color: 'var(--text-dark)',
-                    minWidth: '40px',
-                    textAlign: 'right',
-                  }}
-                >
-                  {quizSeconds}s
-                </span>
+                <span className="quizTimerNum">{quizSeconds}s</span>
               </div>
               {question ? (
-                <>
-                  <h3 style={{ marginBottom: '15px' }}>
-                    SOAL {question.number}: {question.prompt}
-                  </h3>
-                  <div className="answerGrid">
-                    {question.options.map((o, i) => (
-                      <button
-                        key={i}
-                        disabled={busy}
-                        onClick={() => answer(i)}
-                      >
-                        {'ABCD'[i]}. {o}
-                      </button>
-                    ))}
-                  </div>
-                </>
+                <QuizPanel
+                  question={question}
+                  locked={!quizReady}
+                  lockMs={QUIZ_LOCK_MS}
+                  busy={busy}
+                  onAnswer={answer}
+                />
               ) : (
                 <p>Memuat soal...</p>
               )}
